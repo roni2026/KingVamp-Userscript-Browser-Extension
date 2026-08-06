@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KingVamp Editor</title>
+  <link rel="stylesheet" href="../assets/theme.css">
+  <link rel="stylesheet" href="../lib/codemirror.min.css">
+  <link rel="stylesheet" href="../lib/codemirror.dracula.min.css">
+  <style>
+    .bar { display: flex; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: #0d0d14; }
+    .bar .title { font-weight: 700; }
+    #editorWrap { height: calc(100vh - 170px); }
+    body.settings-open #editorWrap { height: calc(100vh - 420px); }
+    .CodeMirror { height: 100%; font-size: 13px; }
+    #auditPanel { border-top: 1px solid var(--border); padding: 8px 18px; max-height: 110px; overflow: auto; background: var(--panel); }
+    #auditPanel .finding { margin: 4px 0; padding: 6px 10px; }
+    #auditPanel .finding p { display: none; }
+    #savedNote { color: var(--good); font-size: 12px; }
+    #settingsPanel { display: none; border-top: 1px solid var(--border); background: var(--panel); padding: 12px 18px; height: 250px; overflow: auto; }
+    body.settings-open #settingsPanel { display: block; }
+    #settingsPanel h3 { margin: 0 0 6px; font-size: 13px; }
+    #settingsPanel label { font-size: 12px; color: var(--muted); display: block; margin: 8px 0 3px; }
+    #settingsPanel textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
+    </svg>
+    <span class="title" id="edTitle">New script</span>
+    <span id="savedNote"></span>
+    <div class="kv-spacer"></div>
+    <button class="btn small" id="btnSettings">Script settings</button>
+    <button class="btn small danger" id="btnDelete">Delete</button>
+    <button class="btn small" id="btnCancel">Close</button>
+    <button class="btn small primary" id="btnSave">Save (Ctrl+S)</button>
+  </div>
+
+  <div id="editorWrap"><textarea id="code"></textarea></div>
+
+  <div id="settingsPanel">
+    <div class="cols">
+      <div>
+        <h3>Extra sites</h3>
+        <label>Also run on (one per line, e.g. *://*.example.com/*)</label>
+        <textarea id="userIncludes" rows="5" placeholder="*://*.example.com/*"></textarea>
+      </div>
+      <div>
+        <h3>Never run on</h3>
+        <label>Block this script from (one per line)</label>
+        <textarea id="userExcludes" rows="5" placeholder="*://mail.google.com/*"></textarea>
+      </div>
+      <div>
+        <h3>Stored data</h3>
+        <label>This script's saved values (JSON - from GM_setValue)</label>
+        <textarea id="valuesJson" rows="5" placeholder="{}"></textarea>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn small primary" id="btnSaveSettings">Save settings</button>
+      <span class="muted" id="settingsNote"></span>
+    </div>
+  </div>
+
+  <div id="auditPanel"><span class="muted" style="font-size:12px">Safety scan runs when you save.</span></div>
+
+  <script src="../lib/codemirror.min.js"></script>
+  <script src="../lib/codemirror.javascript.min.js"></script>
+  <script src="../src/match.js"></script>
+  <script src="../src/audit.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

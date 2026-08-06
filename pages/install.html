@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Install script - KingVamp</title>
+  <link rel="stylesheet" href="../assets/theme.css">
+  <style>
+    main { max-width: 860px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin-bottom: 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    pre.code {
+      background: #0d0d14; border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; overflow: auto; max-height: 420px; font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
+    }
+    .actions { display: flex; gap: 10px; margin-top: 18px; }
+    .err { color: var(--red2); padding: 30px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="kv-head">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
+        <path d="M8 20 L9.5 20 L8.75 23 Z M14.5 20 L16 20 L15.25 23 Z" fill="#eceaf2"/>
+      </svg>
+      King<span class="vamp">Vamp</span>
+    </div>
+    <span class="tag red">script installer</span>
+  </div>
+  <main id="main"><div class="sub">Loading script...</div></main>
+
+  <script src="../src/match.js"></script>
+  <script src="../src/audit.js"></script>
+  <script src="install.js"></script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>KingVamp Dashboard</title>
+  <link rel="stylesheet" href="../assets/theme.css">
+  <style>
+    body { min-width: 720px; }
+    .tabs { display: flex; gap: 4px; padding: 0 18px; background: #0d0d14; border-bottom: 1px solid var(--border); }
+    .tab { padding: 10px 18px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; font-size: 13px; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--red2); border-bottom-color: var(--red); }
+    main { padding: 20px 24px; max-width: 1000px; margin: 0 auto; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+    .filter-row { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+    .filter-row .f-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 8px; }
+    .filter-row .f-grid { display: grid; grid-template-columns: 1.4fr 1.2fr 1fr 1fr; gap: 8px; }
+    .filter-row .f-count { margin-top: 8px; font-size: 12px; }
+    .script-card { display: flex; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+    .script-card.disabled { opacity: .55; }
+    .script-card .grow { flex: 1; min-width: 0; }
+    .script-card h3 { margin: 0 0 3px; font-size: 15px; }
+    .script-card .meta { font-size: 12px; color: var(--muted); }
+    .script-card .btns { display: flex; gap: 6px; }
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state h2 { color: var(--text); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+    .privacy-note { background: #101a13; border: 1px solid #1d3a28; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
+    .privacy-note b { color: var(--good); }
+    .hidden { display: none !important; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
+    .settings-row .desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    h2.section { font-size: 16px; margin: 22px 0 10px; }
+    .recipe { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--panel2); }
+    .recipe .grow { flex: 1; }
+    .recipe b { display: block; }
+    .recipe .desc { font-size: 12px; color: var(--muted); }
+    .log-line { display: flex; gap: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 5px 10px; border-bottom: 1px solid #1b1b28; }
+    .log-line .t { color: var(--muted); flex: none; }
+    .log-line.error .m { color: var(--red2); }
+    .log-group { margin-bottom: 18px; }
+    .log-group h3 { font-size: 13px; margin: 0 0 6px; color: var(--text); }
+    .sel-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; margin: 3px 4px 3px 0; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+    .sel-chip button { background: none; border: none; color: var(--red2); cursor: pointer; font-size: 13px; padding: 0 2px; }
+    .host-block { margin-bottom: 14px; }
+    .host-block h4 { margin: 0 0 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="kv-head">
+    <div class="logo">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+        <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
+        <path d="M8 20 L9.5 20 L8.75 23 Z M14.5 20 L16 20 L15.25 23 Z" fill="#eceaf2"/>
+      </svg>
+      <div class="brand">
+        <div class="brand-name">King<span class="vamp">Vamp</span> <span class="by">by Roni</span></div>
+        <div class="brand-tag">privacy-first userscript manager</div>
+      </div>
+    </div>
+    <div class="kv-spacer"></div>
+    <label class="row" style="font-size:12px;color:var(--muted)" title="Master switch - pauses every script everywhere">
+      <span id="freezeLabel">Active</span>
+      <span class="switch"><input type="checkbox" id="globalToggle" checked><span class="track"></span></span>
+    </label>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="scripts">Scripts</div>
+    <div class="tab" data-tab="privacy">Privacy Guard</div>
+    <div class="tab" data-tab="logs">Console</div>
+    <div class="tab" data-tab="tools">Tools</div>
+    <div class="tab" data-tab="ai">AI Script Writer</div>
+    <div class="tab" data-tab="settings">Settings</div>
+  </div>
+
+  <main>
+    <!-- SCRIPTS -->
+    <section id="tab-scripts">
+      <div class="filter-row">
+        <div class="f-title">Filter</div>
+        <div class="f-grid">
+          <input type="search" id="search" placeholder="Filter by name or description...">
+          <input type="search" id="siteFilter" placeholder="Filter by site (e.g. youtube)">
+          <select id="statusFilter">
+            <option value="all">All scripts</option>
+            <option value="enabled">Enabled only</option>
+            <option value="disabled">Disabled only</option>
+          </select>
+          <select id="sortBy">
+            <option value="name">Sort: Name (A-Z)</option>
+            <option value="updated">Sort: Recently updated</option>
+            <option value="lastrun">Sort: Last run</option>
+            <option value="runs">Sort: Most runs</option>
+          </select>
+        </div>
+        <div class="f-count muted" id="filterCount"></div>
+      </div>
+      <div class="toolbar">
+        <div class="kv-spacer"></div>
+        <button class="btn" id="btnImport">Import</button>
+        <button class="btn" id="btnExport">Export all</button>
+        <button class="btn" id="btnUpdates">Check updates</button>
+        <button class="btn primary" id="btnNew">+ New script</button>
+        <input type="file" id="fileInput" accept=".zip,.js,.txt" multiple class="hidden">
+      </div>
+      <div id="scriptList"></div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section id="tab-privacy" class="hidden">
+      <div class="privacy-note">
+        <b>KingVamp runs 100% on your device.</b><br>
+        <span class="muted">No accounts, no analytics, no telemetry - nothing is ever sent anywhere by KingVamp itself.
+        Below you can see exactly which servers your <i>scripts</i> talked to, so no script can secretly steal your data.</span>
+      </div>
+      <div class="toolbar">
+        <h2 class="section" style="margin:0">Script network activity</h2>
+        <div class="kv-spacer"></div>
+        <button class="btn danger" id="btnClearLog">Clear log</button>
+      </div>
+      <div class="panel"><div id="netTable"></div></div>
+    </section>
+
+    <!-- CONSOLE / LOGS -->
+    <section id="tab-logs" class="hidden">
+      <div class="toolbar">
+        <h2 class="section" style="margin:0">Script console</h2>
+        <div class="kv-spacer"></div>
+        <button class="btn danger" id="btnClearLogs">Clear all</button>
+      </div>
+      <p class="muted" style="margin-top:0">Messages from GM_log() and script errors land here, so nothing fails silently.</p>
+      <div class="panel"><div id="logView"></div></div>
+    </section>
+
+    <!-- TOOLS -->
+    <section id="tab-tools" class="hidden">
+      <h2 class="section" style="margin-top:0">Ready-made recipes</h2>
+      <p class="muted">Useful mini-scripts, reviewed by KingVamp. One click adds them - no copying code, no websites needed.</p>
+      <div id="recipes"></div>
+
+      <h2 class="section">Hidden elements</h2>
+      <p class="muted">Things you removed with "Hide an element" from the toolbar popup. They stay hidden on every visit.</p>
+      <div class="panel"><div id="hideList"></div></div>
+
+      <h2 class="section">Blocked sites</h2>
+      <p class="muted">KingVamp never runs scripts on these sites.</p>
+      <div class="row" style="margin-bottom:10px">
+        <input type="text" id="blockInput" placeholder="example.com" style="max-width:260px">
+        <button class="btn" id="btnBlock">Block site</button>
+      </div>
+      <div class="panel"><div id="blockList"></div></div>
+    </section>
+
+    <!-- AI -->
+    <section id="tab-ai" class="hidden">
+      <div class="panel">
+        <h2 class="section" style="margin-top:0">Describe it, KingVamp writes it</h2>
+        <p class="muted">Tell KingVamp what you want a script to do in plain words. It writes a ready-to-use userscript and opens it in the editor so you can review every line before installing.</p>
+        <textarea id="aiPrompt" rows="4" placeholder="Example: On youtube.com, remove the shorts shelf from the homepage and hide comments"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="btnAi">Write my script</button>
+          <span class="muted" id="aiStatus"></span>
+        </div>
+        <div id="aiOut"></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="hidden">
+      <div class="panel">
+        <h2 class="section" style="margin-top:0">Settings</h2>
+        <div class="settings-row">
+          <div><b>Scripts enabled</b><div class="desc">Master switch for every script on every site.</div></div>
+          <span class="switch"><input type="checkbox" id="setGlobal"><span class="track"></span></span>
+        </div>
+        <div class="settings-row">
+          <div><b>Automatic update checks</b><div class="desc">Check @updateURL / @downloadURL twice a day.</div></div>
+          <span class="switch"><input type="checkbox" id="setAutoUpdate"><span class="track"></span></span>
+        </div>
+        <div class="settings-row">
+          <div><b>Badge counter</b><div class="desc">Show how many scripts ran on the current page.</div></div>
+          <span class="switch"><input type="checkbox" id="setBadge"><span class="track"></span></span>
+        </div>
+        <div class="settings-row">
+          <div><b>Keyboard shortcut</b><div class="desc">Cmd+Shift+K (Mac) or Ctrl+Shift+K opens this dashboard.</div></div>
+          <span></span>
+        </div>
+        <div class="settings-row">
+          <div><b>Storage used</b><div class="desc" id="storageUsed">-</div></div>
+          <span></span>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h2 class="section" style="margin-top:0">The KingVamp promise</h2>
+        <p class="muted" style="margin-bottom:0">
+          Other script managers have been caught collecting browsing data. KingVamp is built the opposite way:
+          everything - your scripts, settings, values and logs - lives only in this browser on this device.
+          There is no KingVamp server that receives anything. You can verify this yourself in the Privacy Guard tab:
+          KingVamp never appears there, because it never phones home.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <script src="../lib/jszip.min.js"></script>
+  <script src="../src/match.js"></script>
+  <script src="../src/audit.js"></script>
+  <script src="../ai-config.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="../assets/theme.css">
+  <style>
+    body { width: 330px; }
+    .kv-head .brand-name { font-size: 15px; }
+    .kv-head .brand-name .by { font-size: 11px; }
+    .kv-head .brand-tag { font-size: 10.5px; }
+    .script-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+    .script-row .info { flex: 1; min-width: 0; }
+    .script-row .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .script-row .sub { font-size: 11px; color: var(--muted); }
+    .empty { padding: 22px 16px; text-align: center; color: var(--muted); }
+    .actions { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
+    .actions .btn { flex: 1; justify-content: center; min-width: 45%; }
+    .foot { padding: 8px 16px; font-size: 11px; color: var(--muted); text-align: center; border-top: 1px solid var(--border); }
+    .freeze { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .sect { padding: 6px 16px 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+    .cmd-row { display: block; width: calc(100% - 32px); margin: 4px 16px; text-align: left; }
+    .cmd-row .who { font-size: 11px; color: var(--muted); }
+    .site-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+    .site-row b { color: var(--text); font-weight: 600; }
+    #cmdSection.hidden, #list.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="kv-head">
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
+        <path d="M8 20 L9.5 20 L8.75 23 Z M14.5 20 L16 20 L15.25 23 Z" fill="#eceaf2"/>
+      </svg>
+      <div class="brand">
+        <div class="brand-name">King<span class="vamp">Vamp</span> <span class="by">by Roni</span></div>
+        <div class="brand-tag">privacy-first userscript manager</div>
+      </div>
+    </div>
+    <div class="kv-spacer"></div>
+    <label class="freeze" title="Master switch - pauses every script everywhere">
+      <span id="freezeLabel">Active</span>
+      <span class="switch"><input type="checkbox" id="globalToggle" checked><span class="track"></span></span>
+    </label>
+  </div>
+
+  <div id="list"></div>
+
+  <div id="cmdSection" class="hidden">
+    <div class="sect">Script commands on this page</div>
+    <div id="cmdList"></div>
+  </div>
+
+  <div class="site-row">
+    <span style="flex:1">Run KingVamp on <b id="siteHost">this site</b></span>
+    <span class="switch"><input type="checkbox" id="siteToggle" checked><span class="track"></span></span>
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="hideEl">Hide an element</button>
+    <button class="btn" id="newForSite">+ Script for this site</button>
+    <button class="btn primary" id="openDash" style="min-width:100%">Dashboard</button>
+  </div>
+  <div class="foot">100% local &middot; no tracking &middot; Cmd+Shift+K opens dashboard</div>
+
+  <script src="../src/match.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

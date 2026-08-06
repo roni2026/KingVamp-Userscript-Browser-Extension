@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "KingVamp",
+  "version": "1.2.0",
+  "description": "KingVamp by Roni - privacy-first userscript manager. Run scripts on any site with a built-in safety scanner, network monitor and AI script writer. 100% local - no tracking, no data leaves your device.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "pages/popup.html",
+    "default_title": "KingVamp",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/bridge.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "scripting",
+    "tabs",
+    "webNavigation",
+    "notifications",
+    "alarms",
+    "downloads"
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "options_page": "pages/dashboard.html",
+  "commands": {
+    "open-dashboard": {
+      "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" },
+      "description": "Open the KingVamp dashboard"
+    }
+  }
+}
