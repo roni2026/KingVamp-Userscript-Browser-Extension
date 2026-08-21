@@ -1,568 +1,512 @@
-// KingVamp background service worker - the engine.
-// Injects userscripts (CSP-immune), answers GM API calls, logs network
-// activity and script logs, manages menu commands, hide-rules, blocklist.
-import './match.js';
-const KV = globalThis.KVMatch;
+// KingVamp Background Service Worker v2.0.0
 
-const DEFAULT_SETTINGS = { globalEnabled: true, autoUpdate: true, badgeCount: true };
-
-async function getStore(key, def) {
-  const o = await chrome.storage.local.get(key);
-  return o[key] !== undefined ? o[key] : def;
+// ── Metadata Parser ──────────────────────────────────────────────
+function parseMeta(code) {
+  const block = code.match(/\/\/\s*==UserScript==\s*\n([\s\S]*?)\n\s*\/\/\s*==\/UserScript==/);
+  if (!block) return { name: 'Unnamed Script' };
+  const multi = ['match','include','exclude','exclude-match','require','resource','grant','connect'];
+  const meta = {};
+  for (const line of block[1].split('\n')) {
+    const m = line.match(/^\s*\/\/\s*@(\S+)\s+(.*?)\s*$/);
+    if (!m) continue;
+    const [,key,val] = m;
+    if (multi.includes(key)) { meta[key] = meta[key] || []; meta[key].push(val); }
+    else meta[key] = val;
+  }
+  if (!meta.name) meta.name = 'Unnamed Script';
+  return meta;
 }
-async function getScripts() { return getStore('scripts', {}); }
-async function getSettings() { return Object.assign({}, DEFAULT_SETTINGS, await getStore('settings', {})); }
 
-// ---------------------------------------------------------------------------
-// MAIN-world bootstrap (serialized into pages; must be self-contained)
-// ---------------------------------------------------------------------------
-function kingvampBoot(payload) {
+function buildDefaultMeta(host) {
+  return `// ==UserScript==
+// @name         New Script for ${host || 'All Sites'}
+// @namespace    https://kingvamp.local/
+// @version      1.0.0
+// @description  Describe what this script does
+// @author       You
+// @match        ${host ? `*://${host}/*` : '*://*/*'}
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_log
+// @run-at       document-idle
+// ==/UserScript==
+
+(function () {
+  'use strict';
+  GM_log('Script running on ' + location.href);
+})();`;
+}
+
+// ── ID generator ─────────────────────────────────────────────────
+const genId = () => 'kv' + Math.random().toString(36).slice(2,9) + Date.now().toString(36);
+
+// ── URL Pattern Matching ──────────────────────────────────────────
+function matchPattern(pat, url) {
+  if (pat === '<all_urls>' || pat === '*') return true;
   try {
-    const s = payload.s;
-    const CH = 'kingvamp:' + s.id;
-    let seq = 0;
-    const pending = new Map();
-    const menuCmds = new Map();
-    let cmdSeq = 0;
-    const valListeners = {};
-
-    window.addEventListener('message', (ev) => {
-      if (ev.source !== window) return;
-      const d = ev.data;
-      if (!d || d.ch !== CH) return;
-      if (d.dir === 'r') {
-        const p = pending.get(d.id);
-        if (!p) return;
-        pending.delete(d.id);
-        if (d.error) p.rej(new Error(d.error)); else p.res(d.value);
-      } else if (d.dir === 'kv-cmd') {
-        const f = menuCmds.get(d.id);
-        if (f) { try { f(); } catch (e) { console.error('[KingVamp] menu command: ' + (e && e.message || e)); } }
-      } else if (d.dir === 'kv-sync') {
-        const ch = d.changes || {};
-        for (const k of Object.keys(ch)) {
-          const old = store[k];
-          if (ch[k].n === undefined) delete store[k]; else store[k] = ch[k].n;
-          (valListeners[k] || []).slice().forEach((cb) => {
-            try { cb(k, old, ch[k].n, true); } catch (e) {}
-          });
-        }
+    if (pat.includes('://')) {
+      const schemeEnd = pat.indexOf('://');
+      const scheme = pat.slice(0, schemeEnd);
+      const rest = pat.slice(schemeEnd + 3);
+      const slashIdx = rest.indexOf('/');
+      const host = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+      const path = slashIdx === -1 ? '/*' : '/' + rest.slice(slashIdx + 1);
+      const u = new URL(url);
+      const proto = u.protocol.slice(0, -1);
+      if (scheme !== '*' && scheme !== proto) return false;
+      if (host !== '*') {
+        if (host.startsWith('*.')) {
+          const sfx = host.slice(2);
+          if (u.hostname !== sfx && !u.hostname.endsWith('.' + sfx)) return false;
+        } else if (host !== u.hostname) return false;
       }
-    });
-
-    function call(api, args) {
-      return new Promise((res, rej) => {
-        const id = ++seq;
-        pending.set(id, { res, rej });
-        window.postMessage({ ch: CH, dir: 'q', id: id, api: api, args: args }, '*');
-      });
+      const pr = new RegExp('^' + path.replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*') + '$');
+      return pr.test(u.pathname + u.search);
     }
-    function fire(api, args) {
-      window.postMessage({ ch: CH, dir: 'q', id: 0, api: api, args: args }, '*');
-    }
+    const gr = new RegExp('^' + pat.replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\?/g,'.') + '$');
+    return gr.test(url);
+  } catch { return false; }
+}
 
-    // ---- network monitor: attribute page requests to this script ----
-    function netHit(u) {
-      try { fire('netHit', [new URL(u, location.href).hostname]); } catch (e) {}
-    }
-    try {
-      if (!window.__kvNet) window.__kvNet = {};
-      if (!window.__kvNet[s.id]) {
-        window.__kvNet[s.id] = true;
-        const of = window.fetch;
-        if (of) {
-          window.fetch = function () {
-            try { netHit(typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url) || ''); } catch (e) {}
-            return of.apply(this, arguments);
-          };
-        }
-        const oo = XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.open = function (m, u) {
-          try { netHit(u); } catch (e) {}
-          return oo.apply(this, arguments);
-        };
-      }
-    } catch (e) {}
-
-    // ---- GM value store (preloaded snapshot = synchronous legacy API) ----
-    const store = Object.assign({}, payload.values);
-    const resources = payload.resources || {};
-
-    const GM = {
-      info: { script: { name: s.name, version: s.version }, scriptHandler: 'KingVamp', version: '1.1.0' },
-      getValue: (k, d) => (k in store ? store[k] : d),
-      setValue: (k, v) => { store[k] = v; call('valueSet', [k, v]).catch(() => {}); },
-      deleteValue: (k) => { delete store[k]; call('valueDel', [k]).catch(() => {}); },
-      listValues: () => Object.keys(store),
-      addValueChangeListener: (key, cb) => {
-        (valListeners[key] = valListeners[key] || []).push(cb);
-        return cb;
-      },
-      removeValueChangeListener: (id) => {
-        for (const k of Object.keys(valListeners)) {
-          const i = valListeners[k].indexOf(id);
-          if (i >= 0) valListeners[k].splice(i, 1);
-        }
-      },
-      log: function () {
-        fire('log', ['log', Array.from(arguments).map(String).join(' ')]);
-      },
-      addStyle: (css) => {
-        const el = document.createElement('style');
-        el.textContent = css;
-        (document.head || document.documentElement).appendChild(el);
-        return el;
-      },
-      getResourceText: (n) => (n in resources ? resources[n] : null),
-      getResourceURL: (n) => (n in resources ? 'data:text/plain;base64,' + btoa(unescape(encodeURIComponent(resources[n]))) : null),
-      openInTab: (url, active) => call('openTab', [url, active !== false]),
-      notification: (a, b, c, d) => {
-        const o = typeof a === 'object' ? a : { text: a, title: b, image: c, onclick: d };
-        return call('notify', [o]);
-      },
-      setClipboard: (text) => {
-        const ta = document.createElement('textarea');
-        ta.value = String(text);
-        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
-        document.documentElement.appendChild(ta);
-        ta.select();
-        try { document.execCommand('copy'); } catch (e) {}
-        ta.remove();
-      },
-      xmlhttpRequest: (details) => {
-        const plain = {};
-        for (const k in details) if (typeof details[k] !== 'function') plain[k] = details[k];
-        call('xhr', [plain])
-          .then((r) => { if (details.onload) details.onload(r); })
-          .catch((e) => { if (details.onerror) details.onerror({ error: String(e) }); });
-        return { abort: function () {} };
-      },
-      download: (a, b) => {
-        const o = typeof a === 'object' ? a : { url: a, name: b };
-        return call('download', [o]);
-      },
-      registerMenuCommand: (name, fn) => {
-        const id = ++cmdSeq;
-        menuCmds.set(id, fn);
-        fire('menuReg', [s.id + ':' + id, name]);
-        return id;
-      },
-      unregisterMenuCommand: (id) => {
-        menuCmds.delete(id);
-        fire('menuUnreg', [s.id + ':' + id]);
-      }
-    };
-
-    const started = performance.now();
-    const run = new Function(
-      'GM', 'GM_info', 'unsafeWindow',
-      'GM_getValue', 'GM_setValue', 'GM_deleteValue', 'GM_listValues',
-      'GM_addValueChangeListener', 'GM_removeValueChangeListener', 'GM_log',
-      'GM_addStyle', 'GM_getResourceText', 'GM_getResourceURL',
-      'GM_openInTab', 'GM_notification', 'GM_setClipboard',
-      'GM_xmlhttpRequest', 'GM_download',
-      'GM_registerMenuCommand', 'GM_unregisterMenuCommand',
-      '"use strict";\n' + payload.code
-    );
-    run(
-      GM, GM.info, window,
-      GM.getValue, GM.setValue, GM.deleteValue, GM.listValues,
-      GM.addValueChangeListener, GM.removeValueChangeListener, GM.log,
-      GM.addStyle, GM.getResourceText, GM.getResourceURL,
-      GM.openInTab, GM.notification, GM.setClipboard,
-      GM.xmlhttpRequest, GM.download,
-      GM.registerMenuCommand, GM.unregisterMenuCommand
-    );
-    fire('ran', [Math.round(performance.now() - started)]);
-  } catch (e) {
-    try {
-      console.error('[KingVamp] ' + (payload && payload.s && payload.s.name) + ': ' + (e && e.message || e));
-      window.postMessage({ ch: 'kingvamp:' + payload.s.id, dir: 'q', id: 0, api: 'log', args: ['error', String(e && e.stack || e)] }, '*');
-    } catch (e2) {}
+function scriptMatchesUrl(script, url) {
+  if (!script.enabled) return false;
+  const m = script.meta || {};
+  for (const ex of [...(m.exclude||[]), ...(m['exclude-match']||[])]) {
+    if (matchPattern(ex, url)) return false;
   }
-}
-// ---------------------------------------------------------------------------
-// Element picker (injected on demand into the active tab, isolated world)
-// ---------------------------------------------------------------------------
-function kingvampPicker() {
-  if (window.__kvPicking) return;
-  window.__kvPicking = true;
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #e1062c;background:rgba(225,6,44,.15);display:none';
-  const tip = document.createElement('div');
-  tip.textContent = 'KingVamp: click anything to hide it forever · Esc to cancel';
-  tip.style.cssText = 'position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:2147483647;background:#0a0a0f;color:#fff;padding:8px 16px;border:1px solid #e1062c;border-radius:0 0 10px 10px;font:13px -apple-system,sans-serif';
-  document.documentElement.appendChild(ov);
-  document.documentElement.appendChild(tip);
-  let cur = null;
-  function selectorFor(el) {
-    if (el.id) return '#' + CSS.escape(el.id);
-    const parts = [];
-    let n = el;
-    while (n && n !== document.body && n !== document.documentElement && parts.length < 5) {
-      let p = n.tagName.toLowerCase();
-      if (n.classList && n.classList.length) p += '.' + Array.from(n.classList).slice(0, 2).map((c) => CSS.escape(c)).join('.');
-      const sibs = n.parentElement ? Array.from(n.parentElement.children).filter((c) => c.tagName === n.tagName) : [];
-      if (sibs.length > 1) p += ':nth-of-type(' + (sibs.indexOf(n) + 1) + ')';
-      parts.unshift(p);
-      try { if (document.querySelectorAll(parts.join('>')).length === 1) return parts.join('>'); } catch (e) {}
-      n = n.parentElement;
-    }
-    return parts.join('>');
+  for (const p of [...(m.match||[]), ...(m.include||[])]) {
+    if (matchPattern(p, url)) return true;
   }
-  function move(e) {
-    cur = e.target;
-    if (!cur || !cur.getBoundingClientRect) return;
-    const r = cur.getBoundingClientRect();
-    ov.style.display = 'block';
-    ov.style.left = r.left + 'px'; ov.style.top = r.top + 'px';
-    ov.style.width = r.width + 'px'; ov.style.height = r.height + 'px';
-  }
-  function key(e) { if (e.key === 'Escape') cleanup(); }
-  function click(e) {
-    e.preventDefault(); e.stopPropagation();
-    const sel = cur ? selectorFor(cur) : null;
-    cleanup();
-    if (sel) chrome.runtime.sendMessage({ kv: true, api: 'addHideRule', args: [location.hostname, sel] }).catch(() => {});
-  }
-  function cleanup() {
-    ov.remove(); tip.remove();
-    window.removeEventListener('mousemove', move, true);
-    window.removeEventListener('click', click, true);
-    window.removeEventListener('keydown', key, true);
-    window.__kvPicking = false;
-  }
-  window.addEventListener('mousemove', move, true);
-  window.addEventListener('click', click, true);
-  window.addEventListener('keydown', key, true);
+  return false;
 }
 
-// ---------------------------------------------------------------------------
-// Injection
-// ---------------------------------------------------------------------------
-const RUNAT_ORDER = { 'document-start': 0, 'document-end': 1, 'document-ready': 1, 'document-idle': 2 };
+// ── Storage Helpers ───────────────────────────────────────────────
+const get = (key) => chrome.storage.local.get(key).then(r => r[key]);
+const set = (key, val) => chrome.storage.local.set({ [key]: val });
 
-async function injectForTab(details, phase) {
-  try {
-    const settings = await getSettings();
-    if (!settings.globalEnabled) return;
-    let host = '';
-    try { host = new URL(details.url).hostname; } catch (e) { return; }
-    const blacklist = await getStore('blacklist', []);
-    if (blacklist.includes(host)) return;
-
-    const scripts = await getScripts();
-    const list = Object.values(scripts).filter((sc) => {
-      if (!sc.enabled) return false;
-      if (details.frameId !== 0 && sc.noframes) return false;
-      if (!KV.urlMatches(details.url, sc)) return false;
-      const want = RUNAT_ORDER[sc.runAt] !== undefined ? RUNAT_ORDER[sc.runAt] : 1;
-      return want === phase;
-    });
-    if (!list.length) return;
-
-    let injected = 0;
-    for (const sc of list) {
-      try {
-        const values = await getStore('val:' + sc.id, {});
-        const code = (sc.requireCode ? sc.requireCode + '\n;\n' : '') + sc.code;
-        await chrome.scripting.executeScript({
-          target: { tabId: details.tabId, frameIds: [details.frameId] },
-          world: 'MAIN',
-          injectImmediately: true,
-          func: kingvampBoot,
-          args: [{ s: { id: sc.id, name: sc.name, version: sc.version }, code, values, resources: sc.resources || {} }]
-        });
-        injected++;
-      } catch (e) { /* restricted page or closed tab */ }
-    }
-
-    if (injected && details.frameId === 0 && settings.badgeCount) {
-      try {
-        await chrome.action.setBadgeBackgroundColor({ color: '#e1062c', tabId: details.tabId });
-        await chrome.action.setBadgeText({ text: String(injected), tabId: details.tabId });
-      } catch (e) {}
-    }
-  } catch (e) {}
+async function getScripts() { return (await get('scripts')) || {}; }
+async function saveScripts(s) { return set('scripts', s); }
+async function getSettings() {
+  const s = (await get('settings')) || {};
+  return { globalEnabled:true, autoUpdate:true, showBadge:true, logLimit:500, updateInterval:12, aiModel:'', aiKey:'', ...s };
 }
+async function getSiteSettings() { return (await get('siteSettings')) || {}; }
 
-chrome.webNavigation.onCommitted.addListener((d) => {
-  maybeRedirectToInstaller(d);
-  if (d.frameId === 0) clearMenusForTab(d.tabId);
-  injectForTab(d, 0);
-});
-chrome.webNavigation.onDOMContentLoaded.addListener((d) => injectForTab(d, 1));
-chrome.webNavigation.onCompleted.addListener((d) => injectForTab(d, 2));
-
-// .user.js install detection - opening a userscript URL shows the installer
-function maybeRedirectToInstaller(details) {
-  if (details.frameId !== 0) return;
-  const url = details.url;
-  if (!/\.user\.js([?#]|$)/.test(url)) return;
-  if (url.startsWith(chrome.runtime.getURL(''))) return;
-  const target = chrome.runtime.getURL('pages/install.html') + '#src=' + encodeURIComponent(url);
-  chrome.tabs.update(details.tabId, { url: target }).catch(() => {});
-}
-// ---------------------------------------------------------------------------
-// Menu commands (per-tab, session storage) and script log buffer
-// ---------------------------------------------------------------------------
-async function getMenus() {
-  return (await chrome.storage.session.get('menus')).menus || {};
-}
-async function clearMenusForTab(tabId) {
-  const menus = await getMenus();
-  if (menus[tabId]) { delete menus[tabId]; await chrome.storage.session.set({ menus }); }
-}
-chrome.tabs.onRemoved.addListener((tabId) => clearMenusForTab(tabId));
-
-async function addLog(sid, level, text) {
-  const buf = await getStore('logbuf', {});
-  const arr = buf[sid] || [];
-  arr.push({ t: Date.now(), lvl: level, msg: String(text).slice(0, 500) });
-  while (arr.length > 100) arr.shift();
-  buf[sid] = arr;
-  await chrome.storage.local.set({ logbuf: buf });
-}
-
-async function logNet(sid, host) {
-  if (!sid || !host) return;
-  const log = await getStore('netlog', {});
-  const e = log[sid] || { total: 0, domains: {}, lastAt: 0 };
-  e.total++;
-  e.domains[host] = (e.domains[host] || 0) + 1;
-  const keys = Object.keys(e.domains);
-  if (keys.length > 200) delete e.domains[keys[0]];
-  e.lastAt = Date.now();
-  log[sid] = e;
-  await chrome.storage.local.set({ netlog: log });
-}
-
-// ---------------------------------------------------------------------------
-// GM API backend + message router
-// ---------------------------------------------------------------------------
-async function handleApi(msg, sender) {
-  const a = msg.args || [];
-  const tabId = sender.tab && sender.tab.id;
-  switch (msg.api) {
-    case 'valueSet': {
-      const key = 'val:' + msg.sid;
-      const v = await getStore(key, {});
-      v[a[0]] = a[1];
-      await chrome.storage.local.set({ [key]: v });
-      return null;
-    }
-    case 'valueDel': {
-      const key = 'val:' + msg.sid;
-      const v = await getStore(key, {});
-      delete v[a[0]];
-      await chrome.storage.local.set({ [key]: v });
-      return null;
-    }
-    case 'openTab':
-      await chrome.tabs.create({ url: a[0], active: a[1] !== false, openerTabId: tabId });
-      return null;
-    case 'notify': {
-      const o = a[0] || {};
-      await chrome.notifications.create({
-        type: 'basic', iconUrl: 'icons/icon128.png',
-        title: String(o.title || 'KingVamp script'),
-        message: String(o.text || o.message || '')
-      });
-      return null;
-    }
-    case 'xhr': {
-      const d = a[0] || {};
-      try { await logNet(msg.sid, new URL(d.url, msg.pageUrl).hostname); } catch (e) {}
-      const resp = await fetch(d.url, {
-        method: d.method || 'GET',
-        headers: d.headers || {},
-        body: d.data !== undefined ? d.data : null,
-        credentials: d.anonymous ? 'omit' : 'include'
-      });
-      const text = await resp.text();
-      let headers = '';
-      resp.headers.forEach((v, k) => { headers += k + ': ' + v + '\r\n'; });
-      let parsed = text;
-      if (d.responseType === 'json') { try { parsed = JSON.parse(text); } catch (e) {} }
-      return { status: resp.status, statusText: resp.statusText, responseHeaders: headers, responseText: text, response: parsed, readyState: 4, finalUrl: resp.url };
-    }
-    case 'download': {
-      const o = a[0] || {};
-      await chrome.downloads.download({ url: o.url, filename: o.name || undefined, saveAs: false });
-      return null;
-    }
-    case 'netHit':
-      await logNet(msg.sid, a[0]);
-      return null;
-    case 'log':
-      await addLog(msg.sid, a[0] || 'log', a[1] || '');
-      return null;
-    case 'menuReg': {
-      if (tabId == null) return null;
-      const menus = await getMenus();
-      const forTab = menus[tabId] || {};
-      forTab[a[0]] = { sid: msg.sid, name: String(a[1] || 'Command') };
-      menus[tabId] = forTab;
-      await chrome.storage.session.set({ menus });
-      return null;
-    }
-    case 'menuUnreg': {
-      if (tabId == null) return null;
-      const menus = await getMenus();
-      if (menus[tabId]) { delete menus[tabId][a[0]]; await chrome.storage.session.set({ menus }); }
-      return null;
-    }
-    case 'getMenuCommands': {
-      const menus = await getMenus();
-      const forTab = menus[a[0]] || {};
-      const scripts = await getScripts();
-      return Object.entries(forTab).map(([cmdId, m]) => ({
-        cmdId, name: m.name, scriptName: scripts[m.sid] ? scripts[m.sid].name : 'Script'
-      }));
-    }
-    case 'runMenuCommand': {
-      const menus = await getMenus();
-      const m = (menus[a[0]] || {})[a[1]];
-      if (!m) return null;
-      await chrome.tabs.sendMessage(a[0], { kv: true, api: 'kvMenuRun', sid: m.sid, cmdId: a[1] });
-      return null;
-    }
-    case 'ran': {
-      const stats = await getStore('stats', {});
-      const st = stats[msg.sid] || { runs: 0, lastRun: 0, totalMs: 0 };
-      st.runs++;
-      st.lastRun = Date.now();
-      st.totalMs += a[0] || 0;
-      stats[msg.sid] = st;
-      await chrome.storage.local.set({ stats });
-      return null;
-    }
-    case 'getScriptsFor': {
-      const scripts = await getScripts();
-      const stats = await getStore('stats', {});
-      return Object.values(scripts)
-        .filter((sc) => KV.urlMatches(a[0], sc))
-        .map((sc) => ({ id: sc.id, name: sc.name, version: sc.version, enabled: sc.enabled, runs: (stats[sc.id] || {}).runs || 0 }));
-    }
-    case 'fetchText': {
-      const r = await fetch(a[0]);
-      if (!r.ok) throw new Error('Could not download (HTTP ' + r.status + ')');
-      return await r.text();
-    }
-    case 'checkUpdates':
-      return await checkUpdates();
-    case 'startPicker':
-      await chrome.scripting.executeScript({ target: { tabId: a[0] }, func: kingvampPicker });
-      return null;
-    case 'addHideRule': {
-      const rules = await getStore('hiderules', {});
-      const arr = rules[a[0]] || [];
-      if (!arr.includes(a[1])) arr.push(a[1]);
-      rules[a[0]] = arr;
-      await chrome.storage.local.set({ hiderules: rules });
-      try {
-        await chrome.notifications.create({ type: 'basic', iconUrl: 'icons/icon128.png', title: 'KingVamp', message: 'Hidden on ' + a[0] + '. Manage it in Dashboard → Tools.' });
-      } catch (e) {}
-      return null;
-    }
-    case 'getHideRules': {
-      const rules = await getStore('hiderules', {});
-      return rules[a[0]] || [];
-    }
-    case 'removeHideRule': {
-      const rules = await getStore('hiderules', {});
-      rules[a[0]] = (rules[a[0]] || []).filter((x) => x !== a[1]);
-      if (!rules[a[0]].length) delete rules[a[0]];
-      await chrome.storage.local.set({ hiderules: rules });
-      return null;
-    }
-    case 'getBlacklist':
-      return await getStore('blacklist', []);
-    case 'setBlacklisted': {
-      const list = await getStore('blacklist', []);
-      const host = a[0], blocked = a[1];
-      const next = blocked ? [...new Set(list.concat([host]))] : list.filter((h) => h !== host);
-      await chrome.storage.local.set({ blacklist: next });
-      return next;
-    }
-    default:
-      throw new Error('Unknown API: ' + msg.api);
-  }
-}
-
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || msg.kv !== true) return;
-  handleApi(msg, sender)
-    .then((value) => sendResponse({ value: value === undefined ? null : value }))
-    .catch((e) => sendResponse({ error: String(e && e.message || e) }));
-  return true;
-});
-// ---------------------------------------------------------------------------
-// Cross-tab GM value sync (GM_addValueChangeListener)
-// ---------------------------------------------------------------------------
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (changes.settings) setupAlarm();
-  for (const key of Object.keys(changes)) {
-    if (!key.startsWith('val:')) continue;
-    const sid = key.slice(4);
-    const nv = changes[key].newValue || {}, ov = changes[key].oldValue || {};
-    const diff = {};
-    for (const k of new Set(Object.keys(nv).concat(Object.keys(ov)))) diff[k] = { o: ov[k], n: nv[k] };
-    chrome.tabs.query({}).then((tabs) => {
-      for (const t of tabs) {
-        chrome.tabs.sendMessage(t.id, { kv: true, api: 'kvValSync', sid, changes: diff }).catch(() => {});
-      }
-    }).catch(() => {});
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Update checker (@updateURL / @downloadURL, version compare)
-// ---------------------------------------------------------------------------
-async function checkUpdates() {
-  const scripts = await getScripts();
-  const result = { checked: 0, updated: [], failed: [] };
-  for (const sc of Object.values(scripts)) {
-    const metaUrl = sc.updateURL || sc.downloadURL;
-    if (!metaUrl) continue;
-    result.checked++;
-    try {
-      const metaCode = await (await fetch(metaUrl)).text();
-      const meta = KV.parseMetadata(metaCode);
-      if (meta.version && KV.semverGt(meta.version, sc.version)) {
-        const fullCode = sc.downloadURL ? await (await fetch(sc.downloadURL)).text() : metaCode;
-        const full = KV.parseMetadata(fullCode);
-        sc.code = fullCode;
-        sc.version = full.version || meta.version;
-        sc.updatedAt = Date.now();
-        result.updated.push(sc.name);
-      }
-    } catch (e) {
-      result.failed.push(sc.name);
-    }
-  }
-  await chrome.storage.local.set({ scripts });
-  return result;
-}
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'kv-update') checkUpdates().catch(() => {});
-});
-
-async function setupAlarm() {
+// ── Logging ───────────────────────────────────────────────────────
+async function addLog(entry) {
+  let logs = (await get('kv_logs')) || [];
+  logs.unshift({ ...entry, id: genId(), ts: Date.now() });
   const settings = await getSettings();
-  if (settings.autoUpdate) chrome.alarms.create('kv-update', { periodInMinutes: 720 });
-  else chrome.alarms.clear('kv-update');
+  if (logs.length > (settings.logLimit || 500)) logs.length = settings.logLimit;
+  await set('kv_logs', logs);
+  chrome.runtime.sendMessage({ _kv: 'LOG_NEW', entry: logs[0] }).catch(() => {});
 }
-setupAlarm();
 
-// Keyboard shortcut (Cmd/Ctrl+Shift+K) opens the dashboard.
-chrome.commands.onCommand.addListener((cmd) => {
-  if (cmd === 'open-dashboard') chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') });
+async function addNetLog(entry) {
+  let log = (await get('kv_netlog')) || [];
+  log.unshift({ ...entry, id: genId(), ts: Date.now() });
+  if (log.length > 500) log.length = 500;
+  await set('kv_netlog', log);
+  chrome.runtime.sendMessage({ _kv: 'NET_NEW', entry: log[0] }).catch(() => {});
+}
+
+// ── Safety Scanner ────────────────────────────────────────────────
+const SCAN_RULES = [
+  { re: /eval\s*\(/, sev:'warn', msg:'Uses eval() — executes arbitrary code' },
+  { re: /new\s+Function\s*\(/, sev:'warn', msg:'Uses new Function() — similar risk to eval()' },
+  { re: /document\.write\s*\(/, sev:'warn', msg:'Uses document.write() — may break page layout' },
+  { re: /innerHTML\s*=(?!=)/, sev:'info', msg:'Assigns innerHTML — potential XSS if content is unescaped' },
+  { re: /window\.location\s*=/, sev:'warn', msg:'Redirects the browser window' },
+  { re: /crypto\s*\.\s*(subtle|getRandomValues)/i, sev:'info', msg:'Uses Web Crypto API' },
+  { re: /mining|hashrate|monero|xmr|cryptonight/i, sev:'danger', msg:'Possible crypto-miner pattern detected' },
+  { re: /password|passwd|credential/i, sev:'warn', msg:'References sensitive credential fields' },
+  { re: /fetch\s*\(|XMLHttpRequest/, sev:'info', msg:'Makes network requests' },
+  { re: /localStorage|sessionStorage/, sev:'info', msg:'Accesses local browser storage directly' },
+  { re: /document\.cookie/, sev:'info', msg:'Reads or modifies cookies directly' },
+  { re: /unsafeWindow/, sev:'warn', msg:'Uses unsafeWindow — bypasses sandbox isolation' },
+  { re: /GM_xmlhttpRequest|GM\.xmlHttpRequest/, sev:'info', msg:'Makes cross-origin XHR requests via GM API' },
+  { re: /atob\s*\(|btoa\s*\(/, sev:'info', msg:'Uses base64 encoding/decoding' },
+];
+
+function scanScript(code) {
+  return SCAN_RULES.filter(r => r.re.test(code)).map(({ sev, msg }) => ({ sev, msg }));
+}
+
+// ── @require & @resource Loaders ──────────────────────────────────
+const requireCache = new Map();
+
+async function loadRequire(url) {
+  if (requireCache.has(url)) return requireCache.get(url);
+  try {
+    const r = await fetch(url, { cache: 'force-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const code = await r.text();
+    requireCache.set(url, code);
+    return code;
+  } catch (e) {
+    console.warn('[KV] @require failed:', url, e.message);
+    return `/* @require failed: ${url} */`;
+  }
+}
+
+async function loadResources(meta) {
+  const resources = {};
+  for (const entry of (meta.resource || [])) {
+    const [name, url] = entry.split(/\s+/);
+    if (!name || !url) continue;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      const dataUrl = await new Promise(resolve => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.readAsDataURL(blob);
+      });
+      resources[name] = { dataUrl, mimeType: blob.type, url };
+    } catch (e) {
+      console.warn('[KV] @resource failed:', name, e.message);
+    }
+  }
+  return resources;
+}
+
+// ── GM API Code Builder ───────────────────────────────────────────
+function buildGmBoilerplate(scriptId, meta, resources) {
+  const grants = meta.grant || [];
+  const noGrant = grants.includes('none') || grants.length === 0;
+  if (noGrant) return '// @grant none — no GM API injected\n';
+
+  return `
+const _kvId=${JSON.stringify(scriptId)};
+const _kvRes=${JSON.stringify(resources||{})};
+const _kvCall=(type,data)=>new Promise((res,rej)=>{
+  const rid=Math.random().toString(36).slice(2);
+  const fn=e=>{
+    if(e.data?.__kvR!==rid)return;
+    window.removeEventListener('message',fn);
+    e.data.err?rej(new Error(e.data.err)):res(e.data.val);
+  };
+  window.addEventListener('message',fn);
+  window.postMessage({__kv:1,rid,scriptId:_kvId,type,data},'*');
+  setTimeout(()=>{window.removeEventListener('message',fn)},10000);
+});
+const unsafeWindow=window;
+const GM_info={
+  script:{id:_kvId,name:${JSON.stringify(meta.name||'')},namespace:${JSON.stringify(meta.namespace||'')},version:${JSON.stringify(meta.version||'')},description:${JSON.stringify(meta.description||'')},matches:${JSON.stringify(meta.match||[])},grants:${JSON.stringify(grants)}},
+  scriptHandler:'KingVamp',scriptHandlerVersion:'2.0.0',version:'2.0.0',
+  isIncognito:false,downloadMode:'native',
+};
+const GM_getValue=(k,d)=>_kvCall('gv',{k,d});
+const GM_setValue=(k,v)=>_kvCall('sv',{k,v});
+const GM_deleteValue=k=>_kvCall('dv',{k});
+const GM_listValues=()=>_kvCall('lv',{});
+const GM_addValueChangeListener=(k,cb)=>{
+  const lid=Math.random().toString(36).slice(2);
+  _kvCall('avcl',{k,lid});
+  window.addEventListener('message',e=>{
+    if(e.data?.__kvVC?.sid===_kvId&&e.data.__kvVC.k===k)
+      cb(k,e.data.__kvVC.o,e.data.__kvVC.n,e.data.__kvVC.r);
+  });
+  return lid;
+};
+const GM_removeValueChangeListener=lid=>_kvCall('rvcl',{lid});
+const GM_addStyle=css=>{const el=document.createElement('style');el.textContent=css;(document.head||document.documentElement).appendChild(el);return el};
+const GM_log=(...a)=>{const msg=a.map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' ');console.log('[GM]',msg);_kvCall('log',{level:'log',msg})};
+const GM_notification=(d,done)=>{const o=typeof d==='string'?{text:d}:d;_kvCall('notify',o);if(done)setTimeout(done,100)};
+const GM_openInTab=(url,o)=>_kvCall('openTab',{url,opts:o||{}});
+const GM_setClipboard=(data,type)=>_kvCall('clip',{data,type:type||'text'});
+const GM_download=(d)=>_kvCall('dl',typeof d==='string'?{url:d}:d);
+const GM_getResourceText=name=>{const r=_kvRes[name];if(!r)return null;try{return atob(r.dataUrl.split(',')[1])}catch{return null}};
+const GM_getResourceURL=name=>_kvRes[name]?.dataUrl||null;
+const GM_registerMenuCommand=(name,fn,ak)=>{
+  _kvCall('regCmd',{name,ak});
+  window.addEventListener('message',e=>{if(e.data?.__kvCmd?.n===name&&e.data.__kvCmd.sid===_kvId)fn()});
+  return name;
+};
+const GM_unregisterMenuCommand=name=>_kvCall('unregCmd',{name});
+const GM_xmlhttpRequest=details=>{
+  const xid=Math.random().toString(36).slice(2);
+  window.postMessage({__kv:1,rid:xid,scriptId:_kvId,type:'xhr',data:{
+    method:details.method||'GET',url:details.url,
+    headers:details.headers,body:details.data,
+    responseType:details.responseType||'text',timeout:details.timeout,xid
+  }},'*');
+  window.addEventListener('message',function h(e){
+    if(e.data?.__kvXR!==xid)return;
+    window.removeEventListener('message',h);
+    const ev=e.data.event,r=e.data.response;
+    if(ev==='load')details.onload?.(r);
+    else if(ev==='error')details.onerror?.(r);
+    else if(ev==='abort')details.onabort?.();
+    else if(ev==='timeout')details.ontimeout?.();
+  });
+  return{abort:()=>_kvCall('xhrAbort',{xid})};
+};
+const GM_cookie={
+  list:(d,cb)=>_kvCall('cookie',{action:'list',...d}).then(r=>cb(r,null)).catch(e=>cb(null,e.message)),
+  set:(d,cb)=>_kvCall('cookie',{action:'set',...d}).then(r=>cb(r,null)).catch(e=>cb(null,e.message)),
+  delete:(d,cb)=>_kvCall('cookie',{action:'delete',...d}).then(r=>cb(r,null)).catch(e=>cb(null,e.message)),
+};
+const GM={
+  getValue:GM_getValue,setValue:GM_setValue,deleteValue:GM_deleteValue,listValues:GM_listValues,
+  xmlHttpRequest:GM_xmlhttpRequest,notification:GM_notification,openInTab:GM_openInTab,
+  setClipboard:GM_setClipboard,getResourceText:GM_getResourceText,getResourceUrl:GM_getResourceURL,
+  registerMenuCommand:GM_registerMenuCommand,unregisterMenuCommand:GM_unregisterMenuCommand,
+  download:GM_download,cookie:GM_cookie,info:GM_info,log:GM_log,
+};`;
+}
+
+// ── Script Injection ──────────────────────────────────────────────
+async function buildAndInject(tabId, frameId, script, injectImmediately) {
+  const meta = script.meta || {};
+  const requireCodes = await Promise.all((meta.require || []).map(loadRequire));
+  const gm = buildGmBoilerplate(script.id, meta, script.resources || {});
+
+  const wrapped = `(function(){\n"use strict";\n${gm}\n/* @require */\n${requireCodes.join('\n')}\n/* ${meta.name||script.id} */\n${script.code}\n})();`;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, frameIds: [frameId] },
+      world: 'MAIN',
+      func: code => { try { (0,eval)(code); } catch(e) { console.error('[KV]',e.message); } },
+      args: [wrapped],
+      injectImmediately,
+    });
+    const scripts = await getScripts();
+    if (scripts[script.id]) { scripts[script.id].runCount = (scripts[script.id].runCount||0)+1; scripts[script.id].lastRun = Date.now(); await saveScripts(scripts); }
+    await addLog({ scriptId: script.id, scriptName: meta.name||script.id, level:'info', msg:'Injected at '+(meta['run-at']||'document-idle'), url:'' });
+  } catch (e) {
+    await addLog({ scriptId: script.id, scriptName: meta.name||script.id, level:'error', msg: e.message, url:'' });
+    const scripts = await getScripts();
+    if (scripts[script.id]) { scripts[script.id].errorCount = (scripts[script.id].errorCount||0)+1; await saveScripts(scripts); }
+  }
+}
+
+const RUN_AT = { 'document-start':'start','document-body':'end','document-end':'end','document-idle':'idle' };
+
+async function injectForTab(tabId, url, frameId, phase) {
+  const settings = await getSettings();
+  if (!settings.globalEnabled) return;
+  try { if (!new URL(url).protocol.startsWith('http')) return; } catch { return; }
+  const hostname = new URL(url).hostname;
+  const siteSettings = await getSiteSettings();
+  if (siteSettings[hostname]?.disabled) return;
+  const scripts = await getScripts();
+  const matching = Object.values(scripts).filter(s => scriptMatchesUrl(s, url));
+  for (const script of matching) {
+    const runAt = RUN_AT[script.meta?.['run-at']] || 'idle';
+    if (runAt !== phase) continue;
+    buildAndInject(tabId, frameId, script, phase === 'start').catch(console.error);
+  }
+  if (phase === 'end') updateBadge(tabId, matching.length);
+}
+
+async function updateBadge(tabId, count) {
+  const settings = await getSettings();
+  if (!settings.showBadge || !settings.globalEnabled || !count) {
+    chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+    return;
+  }
+  chrome.action.setBadgeText({ tabId, text: String(count) }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ tabId, color: '#e1062c' }).catch(() => {});
+}
+
+// ── GM API Message Handler ────────────────────────────────────────
+const activeXhrs = new Map();
+
+async function handleApi(msg, sender) {
+  const { type, data, scriptId } = msg;
+
+  if (type === 'gv') { const store = (await get('kv_store'))||{}; return store[scriptId+':'+data.k]??data.d; }
+  if (type === 'sv') {
+    const store = (await get('kv_store'))||{};
+    const old = store[scriptId+':'+data.k];
+    store[scriptId+':'+data.k] = data.v;
+    await set('kv_store', store);
+    broadcastVC(scriptId, data.k, old, data.v, false);
+    return true;
+  }
+  if (type === 'dv') { const store=(await get('kv_store'))||{}; delete store[scriptId+':'+data.k]; await set('kv_store',store); return true; }
+  if (type === 'lv') { const store=(await get('kv_store'))||{}; const pre=scriptId+':'; return Object.keys(store).filter(k=>k.startsWith(pre)).map(k=>k.slice(pre.length)); }
+  if (type === 'log') { const scripts=await getScripts(); const name=scripts[scriptId]?.meta?.name||scriptId; await addLog({scriptId,scriptName:name,level:data.level||'log',msg:data.msg,url:sender.url||''}); return true; }
+  if (type === 'notify') { chrome.notifications.create({type:'basic',iconUrl:'../icons/icon48.png',title:data.title||'KingVamp Script',message:data.text||data.message||'',silent:!!data.silent}); return true; }
+  if (type === 'openTab') { chrome.tabs.create({url:data.url,active:data.opts?.active!==false}); return true; }
+  if (type === 'clip') { await set('kv_clipboard',data.data); return true; }
+  if (type === 'dl') { chrome.downloads.download({url:data.url,filename:data.name,saveAs:!!data.saveAs}); return true; }
+  if (type === 'regCmd') {
+    const scripts = await getScripts();
+    if (scripts[scriptId]) { scripts[scriptId].menuCommands=scripts[scriptId].menuCommands||{}; scripts[scriptId].menuCommands[data.name]={name:data.name,ak:data.ak}; await saveScripts(scripts); }
+    return true;
+  }
+  if (type === 'unregCmd') { const scripts=await getScripts(); if(scripts[scriptId]?.menuCommands){delete scripts[scriptId].menuCommands[data.name];await saveScripts(scripts);} return true; }
+  if (type === 'xhr') {
+    const ctrl = new AbortController();
+    activeXhrs.set(data.xid, ctrl);
+    const t0 = Date.now();
+    const tabId = sender.tab?.id;
+    try {
+      const res = await fetch(data.url, { method:data.method||'GET', headers:data.headers, body:data.body||undefined, signal:ctrl.signal });
+      const dur = Date.now()-t0;
+      let resp = data.responseType==='json' ? await res.json() : await res.text();
+      const response = { status:res.status, statusText:res.statusText, responseText:typeof resp==='string'?resp:'', response:resp, finalUrl:res.url, readyState:4, responseHeaders:[...res.headers.entries()].map(([k,v])=>`${k}: ${v}`).join('\r\n') };
+      addNetLog({scriptId,method:data.method,url:data.url,status:res.status,dur,size:typeof resp==='string'?resp.length:0});
+      if (tabId) chrome.tabs.sendMessage(tabId, {__kvXR:data.xid,event:'load',response}).catch(()=>{});
+    } catch(e) {
+      if (tabId) chrome.tabs.sendMessage(tabId, {__kvXR:data.xid,event:e.name==='AbortError'?'abort':'error',response:{error:e.message}}).catch(()=>{});
+      addNetLog({scriptId,method:data.method,url:data.url,status:0,dur:Date.now()-t0,size:0});
+    } finally { activeXhrs.delete(data.xid); }
+    return true;
+  }
+  if (type === 'xhrAbort') { activeXhrs.get(data.xid)?.abort(); return true; }
+  if (type === 'cookie') {
+    const { action, ...rest } = data; const u = sender.url||'';
+    if (action==='list') return chrome.cookies.getAll({url:u,...rest});
+    if (action==='set') return chrome.cookies.set({url:u,...rest});
+    if (action==='delete') return chrome.cookies.remove({url:u,name:rest.name});
+    return null;
+  }
+  return null;
+}
+
+function broadcastVC(scriptId, k, o, n, remote) {
+  chrome.tabs.query({}).then(tabs => {
+    for (const t of tabs) chrome.tabs.sendMessage(t.id, {__kvVC:{sid:scriptId,k,o,n,r:remote}}).catch(()=>{});
+  });
+}
+
+// ── Script Install ────────────────────────────────────────────────
+async function installScript(code, sourceUrl) {
+  const meta = parseMeta(code);
+  const scripts = await getScripts();
+  const existId = Object.keys(scripts).find(id => scripts[id].meta?.name===meta.name && scripts[id].meta?.namespace===meta.namespace);
+  const id = existId || genId();
+  const existing = scripts[id] || {};
+  const resources = await loadResources(meta);
+  const scanResults = scanScript(code);
+  scripts[id] = { ...existing, id, code, meta, enabled: existing.enabled!==undefined?existing.enabled:true, installed: existing.installed||Date.now(), updated: Date.now(), sourceUrl: sourceUrl||existing.sourceUrl||'', resources, scanResults, runCount: existing.runCount||0, errorCount: existing.errorCount||0, menuCommands: existing.menuCommands||{}, tags: existing.tags||[] };
+  await saveScripts(scripts);
+  await addLog({ scriptId:id, scriptName:meta.name, level:'info', msg: existId?`Updated to v${meta.version||'?'}`:'Installed', url: sourceUrl||'' });
+  return { id, script: scripts[id], isUpdate: !!existId };
+}
+
+// ── Auto-Updater ──────────────────────────────────────────────────
+function semverGt(a, b) {
+  if (!a || !b) return false;
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i]||0) > (pb[i]||0)) return true;
+    if ((pa[i]||0) < (pb[i]||0)) return false;
+  }
+  return false;
+}
+
+async function checkUpdates() {
+  const settings = await getSettings();
+  if (!settings.autoUpdate) return;
+  const scripts = await getScripts();
+  for (const s of Object.values(scripts)) {
+    const url = s.meta?.updateURL || s.meta?.downloadURL;
+    if (!url) continue;
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) continue;
+      const code = await res.text();
+      const newMeta = parseMeta(code);
+      if (semverGt(newMeta.version, s.meta?.version)) {
+        await installScript(code, url);
+        chrome.notifications.create({ type:'basic', iconUrl:'../icons/icon48.png', title:'KingVamp — Updated', message:`${newMeta.name} updated to v${newMeta.version}` });
+      }
+    } catch {}
+  }
+}
+
+// ── Element Picker ────────────────────────────────────────────────
+const PICKER_CODE = `(function(){
+  if(window.__kvPickerActive)return;
+  window.__kvPickerActive=true;
+  let hovered=null;
+  const hl=document.createElement('div');
+  hl.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;outline:2px solid #e1062c;background:rgba(225,6,44,0.08);transition:all 0.1s;border-radius:2px;';
+  document.body.appendChild(hl);
+  const tip=document.createElement('div');
+  tip.style.cssText='position:fixed;z-index:2147483647;background:#e1062c;color:#fff;font-family:monospace;font-size:11px;padding:3px 8px;border-radius:3px;pointer-events:none;white-space:nowrap;';
+  document.body.appendChild(tip);
+  function move(e){
+    hovered=e.target;
+    const r=hovered.getBoundingClientRect();
+    Object.assign(hl.style,{left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});
+    tip.style.left=r.left+'px';tip.style.top=(r.top-22)+'px';
+    tip.textContent=hovered.tagName.toLowerCase()+(hovered.id?'#'+hovered.id:'')+(hovered.className&&typeof hovered.className==='string'?'.'+hovered.className.trim().split(/\\s+/).join('.'):'');
+  }
+  function click(e){
+    e.preventDefault();e.stopPropagation();
+    const sel=tip.textContent;
+    cleanup();
+    chrome.runtime.sendMessage({type:'HIDE_ELEMENT',selector:sel,url:location.hostname});
+  }
+  function keydown(e){if(e.key==='Escape')cleanup();}
+  function cleanup(){hl.remove();tip.remove();window.__kvPickerActive=false;document.removeEventListener('mousemove',move,true);document.removeEventListener('click',click,true);document.removeEventListener('keydown',keydown,true);}
+  document.addEventListener('mousemove',move,true);
+  document.addEventListener('click',click,true);
+  document.addEventListener('keydown',keydown,true);
+})();`;
+
+// ── Event Listeners ───────────────────────────────────────────────
+chrome.webNavigation.onCommitted.addListener(({ tabId, url, frameId }) => { injectForTab(tabId, url, frameId, 'start'); });
+chrome.webNavigation.onDOMContentLoaded.addListener(({ tabId, url, frameId }) => { injectForTab(tabId, url, frameId, 'end'); });
+chrome.webNavigation.onCompleted.addListener(({ tabId, url, frameId }) => { injectForTab(tabId, url, frameId, 'idle'); });
+chrome.commands.onCommand.addListener(cmd => { if (cmd === 'open-dashboard') chrome.runtime.openOptionsPage(); });
+chrome.alarms.create('kv_autoupdate', { periodInMinutes: 720 });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'kv_autoupdate') checkUpdates(); });
+
+// ── Message Router ────────────────────────────────────────────────
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg.__kvApi) {
+    handleApi(msg, sender).then(val => reply({ val })).catch(e => reply({ err: e.message }));
+    return true;
+  }
+  const H = {
+    GET_SCRIPTS: () => getScripts(),
+    SAVE_SCRIPT: () => installScript(msg.code, msg.sourceUrl),
+    DELETE_SCRIPT: async () => { const s=await getScripts(); delete s[msg.id]; await saveScripts(s); return {ok:true}; },
+    TOGGLE_SCRIPT: async () => { const s=await getScripts(); if(s[msg.id]){s[msg.id].enabled=msg.enabled;await saveScripts(s);} return {ok:true}; },
+    GET_LOGS: () => get('kv_logs').then(l => l||[]),
+    CLEAR_LOGS: async () => { await set('kv_logs',[]); return {ok:true}; },
+    GET_NETLOG: () => get('kv_netlog').then(l => l||[]),
+    CLEAR_NETLOG: async () => { await set('kv_netlog',[]); return {ok:true}; },
+    GET_SETTINGS: () => getSettings(),
+    SAVE_SETTINGS: async () => { await set('settings',msg.settings); return {ok:true}; },
+    GET_SITE_SETTINGS: () => getSiteSettings(),
+    SAVE_SITE_SETTINGS: async () => { await set('siteSettings',msg.siteSettings); return {ok:true}; },
+    GET_TAB_SCRIPTS: async () => { const [scripts,siteSettings]=await Promise.all([getScripts(),getSiteSettings()]); return {scripts:Object.values(scripts).filter(s=>scriptMatchesUrl(s,msg.url)),siteSettings}; },
+    SCAN_SCRIPT: () => Promise.resolve(scanScript(msg.code)),
+    PARSE_META: () => Promise.resolve(parseMeta(msg.code)),
+    BUILD_DEFAULT: () => Promise.resolve(buildDefaultMeta(msg.host)),
+    CHECK_UPDATES: () => checkUpdates().then(()=>({ok:true})),
+    GET_STORAGE: async () => { const store=(await get('kv_store'))||{}; const pre=msg.id+':'; const out={}; for(const[k,v]of Object.entries(store))if(k.startsWith(pre))out[k.slice(pre.length)]=v; return out; },
+    CLEAR_STORAGE: async () => { const store=(await get('kv_store'))||{}; const pre=msg.id+':'; for(const k of Object.keys(store))if(k.startsWith(pre))delete store[k]; await set('kv_store',store); return {ok:true}; },
+    EXEC_CMD: () => { chrome.tabs.sendMessage(msg.tabId,{__kvCmd:{n:msg.name,sid:msg.scriptId}}).catch(()=>{}); return Promise.resolve(true); },
+    INJECT_PICKER: async () => { await chrome.scripting.executeScript({target:{tabId:msg.tabId},world:'MAIN',func:code=>{(0,eval)(code)},args:[PICKER_CODE]}); return {ok:true}; },
+    HIDE_ELEMENT: async () => { const store=(await get('kv_hides'))||{}; store[msg.url]=store[msg.url]||[]; if(!store[msg.url].includes(msg.selector))store[msg.url].push(msg.selector); await set('kv_hides',store); return {ok:true}; },
+    GET_HIDES: () => get('kv_hides').then(h=>h||{}),
+    CLEAR_HIDE: async () => { const store=(await get('kv_hides'))||{}; if(msg.selector){store[msg.url]=(store[msg.url]||[]).filter(s=>s!==msg.selector);if(!store[msg.url]?.length)delete store[msg.url];}else delete store[msg.url]; await set('kv_hides',store); return {ok:true}; },
+    INJECT_HIDES: async () => { const store=(await get('kv_hides'))||{}; const sels=store[msg.hostname]||[]; if(!sels.length)return{ok:true}; await chrome.scripting.insertCSS({target:{tabId:msg.tabId},css:sels.map(s=>s+'{display:none!important}').join('\n')}); return {ok:true}; },
+  };
+  if (msg.type && H[msg.type]) { H[msg.type]().then(reply).catch(e=>reply({err:e.message})); return true; }
 });
 
-// Open the dashboard on first install.
-chrome.runtime.onInstalled.addListener((d) => {
-  if (d.reason === 'install') chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') });
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (info.status !== 'loading' || !tab.url?.startsWith('http')) return;
+  try { const hostname = new URL(tab.url).hostname; const store=(await get('kv_hides'))||{}; const sels=store[hostname]||[]; if(sels.length)await chrome.scripting.insertCSS({target:{tabId},css:sels.map(s=>s+'{display:none!important}').join('\n')}); } catch {}
 });
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.kv_store) return;
+  const { oldValue: ov={}, newValue: nv={} } = changes.kv_store;
+  for (const k of new Set([...Object.keys(ov), ...Object.keys(nv)])) {
+    if (ov[k] !== nv[k]) { const [sid,...rest]=k.split(':'); broadcastVC(sid,rest.join(':'),ov[k],nv[k],true); }
+  }
+});
+
+console.log('[KingVamp] Service worker v2.0.0 ready');
