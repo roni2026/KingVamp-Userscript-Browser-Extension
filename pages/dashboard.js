@@ -1,532 +1,185 @@
-// KingVamp dashboard - scripts, privacy guard, console logs, tools, AI writer.
-(function () {
-  'use strict';
-  const $ = (s) => document.querySelector(s);
-  const $$ = (s) => Array.from(document.querySelectorAll(s));
-  const KV = window.KVMatch;
-
-  function send(msg) {
-    return chrome.runtime.sendMessage(Object.assign({ kv: true }, msg)).then((r) => {
-      if (r && r.error) throw new Error(r.error);
-      return r && r.value;
-    });
-  }
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const ago = (t) => {
-    if (!t) return 'never';
-    const s = Math.floor((Date.now() - t) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return Math.floor(s / 86400) + 'd ago';
-  };
-
-  // ---------------- tabs ----------------
-  $$('.tab').forEach((t) => t.addEventListener('click', () => {
-    $$('.tab').forEach((x) => x.classList.toggle('active', x === t));
-    $$('main > section').forEach((sec) => sec.classList.toggle('hidden', sec.id !== 'tab-' + t.dataset.tab));
-    if (t.dataset.tab === 'privacy') renderPrivacy();
-    if (t.dataset.tab === 'logs') renderLogs();
-    if (t.dataset.tab === 'tools') renderTools();
-  }));
-
-  // ---------------- settings ----------------
-  async function loadSettings() {
-    const s = Object.assign({ globalEnabled: true, autoUpdate: true, badgeCount: true }, (await chrome.storage.local.get('settings')).settings || {});
-    $('#globalToggle').checked = s.globalEnabled;
-    $('#freezeLabel').textContent = s.globalEnabled ? 'Active' : 'Frozen';
-    $('#setGlobal').checked = s.globalEnabled;
-    $('#setAutoUpdate').checked = s.autoUpdate;
-    $('#setBadge').checked = s.badgeCount;
-    return s;
-  }
-  async function saveSettings(patch) {
-    const s = Object.assign({ globalEnabled: true, autoUpdate: true, badgeCount: true }, (await chrome.storage.local.get('settings')).settings || {});
-    Object.assign(s, patch);
-    await chrome.storage.local.set({ settings: s });
-    loadSettings();
-  }
-  $('#globalToggle').addEventListener('change', (e) => saveSettings({ globalEnabled: e.target.checked }));
-  $('#setGlobal').addEventListener('change', (e) => saveSettings({ globalEnabled: e.target.checked }));
-  $('#setAutoUpdate').addEventListener('change', (e) => saveSettings({ autoUpdate: e.target.checked }));
-  $('#setBadge').addEventListener('change', (e) => saveSettings({ badgeCount: e.target.checked }));
-
-  // ---------------- scripts list + filter row ----------------
-  async function loadFilters() {
-    const f = (await chrome.storage.local.get('filters')).filters || {};
-    if (f.q) $('#search').value = f.q;
-    if (f.site) $('#siteFilter').value = f.site;
-    if (f.status) $('#statusFilter').value = f.status;
-    if (f.sort) $('#sortBy').value = f.sort;
-  }
-  function saveFilters() {
-    chrome.storage.local.set({
-      filters: {
-        q: $('#search').value,
-        site: $('#siteFilter').value,
-        status: $('#statusFilter').value,
-        sort: $('#sortBy').value
-      }
-    });
-  }
-
-  async function renderScripts() {
-    const data = await chrome.storage.local.get(['scripts', 'stats']);
-    const scripts = Object.values(data.scripts || {});
-    const stats = data.stats || {};
-    const q = ($('#search').value || '').toLowerCase();
-    const siteQ = ($('#siteFilter').value || '').toLowerCase();
-    const status = $('#statusFilter').value;
-    const sortBy = $('#sortBy').value;
-    const list = $('#scriptList');
-    list.innerHTML = '';
-
-    const shown = scripts.filter((s) => {
-      if (q && !(s.name || '').toLowerCase().includes(q) && !(s.description || '').toLowerCase().includes(q)) return false;
-      if (status === 'enabled' && !s.enabled) return false;
-      if (status === 'disabled' && s.enabled) return false;
-      if (siteQ) {
-        const sites = (s.matches || []).concat(s.includes || []).join(' ').toLowerCase();
-        if (!sites.includes(siteQ)) return false;
-      }
-      return true;
-    });
-
-    if (sortBy === 'updated') shown.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    else if (sortBy === 'lastrun') shown.sort((a, b) => ((stats[b.id] || {}).lastRun || 0) - ((stats[a.id] || {}).lastRun || 0));
-    else if (sortBy === 'runs') shown.sort((a, b) => ((stats[b.id] || {}).runs || 0) - ((stats[a.id] || {}).runs || 0));
-    else shown.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-    $('#filterCount').textContent = scripts.length
-      ? 'Showing ' + shown.length + ' of ' + scripts.length + ' script' + (scripts.length === 1 ? '' : 's')
-      : '';
-
-    if (!scripts.length) {
-      list.innerHTML = '<div class="empty-state"><h2>No scripts yet</h2><p>Try a ready-made recipe in the Tools tab, let the AI Script Writer build one, or install any .user.js from the web.</p></div>';
-      return;
-    }
-    if (!shown.length) {
-      list.innerHTML = '<div class="empty-state"><p>No scripts match your filters.</p></div>';
-      return;
-    }
-
-    for (const sc of shown) {
-      const st = stats[sc.id] || {};
-      const avg = st.runs ? Math.round((st.totalMs || 0) / st.runs) : 0;
-      const card = document.createElement('div');
-      card.className = 'script-card' + (sc.enabled ? '' : ' disabled');
-      const sites = (sc.matches || []).concat(sc.includes || []).slice(0, 3);
-      card.innerHTML =
-        '<span class="switch"><input type="checkbox" ' + (sc.enabled ? 'checked' : '') + '><span class="track"></span></span>' +
-        '<div class="grow"><h3>' + esc(sc.name || 'Unnamed script') + ' <span class="tag">v' + esc(sc.version || '?') + '</span></h3>' +
-        '<div class="meta">' + esc(sc.description || '') + '</div>' +
-        '<div class="meta">' + sites.map((s) => '<span class="tag">' + esc(s) + '</span>').join('') +
-        ' &middot; ran ' + (st.runs || 0) + 'x' + (st.runs ? ' &middot; avg ' + avg + 'ms' : '') +
-        ' &middot; last ' + ago(st.lastRun) + '</div></div>' +
-        '<div class="btns">' +
-        '<button class="btn small" data-act="edit">Edit</button>' +
-        (sc.downloadURL || sc.updateURL ? '<button class="btn small" data-act="update">Update</button>' : '') +
-        '<button class="btn small danger" data-act="del">Delete</button></div>';
-
-      card.querySelector('input[type=checkbox]').addEventListener('change', async (e) => {
-        const all = (await chrome.storage.local.get('scripts')).scripts || {};
-        if (all[sc.id]) { all[sc.id].enabled = e.target.checked; await chrome.storage.local.set({ scripts: all }); }
-        renderScripts();
-      });
-      card.querySelector('[data-act=edit]').addEventListener('click', () => { location.href = 'editor.html#id=' + sc.id; });
-      const upd = card.querySelector('[data-act=update]');
-      if (upd) upd.addEventListener('click', async () => {
-        upd.disabled = true; upd.textContent = '...';
-        try { await send({ api: 'checkUpdates', args: [] }); } catch (e) {}
-        renderScripts();
-      });
-      card.querySelector('[data-act=del]').addEventListener('click', async () => {
-        if (!confirm('Delete "' + (sc.name || 'this script') + '"? This cannot be undone.')) return;
-        const all = (await chrome.storage.local.get('scripts')).scripts || {};
-        delete all[sc.id];
-        await chrome.storage.local.set({ scripts: all });
-        renderScripts();
-      });
-      list.appendChild(card);
-    }
-  }
-  $('#search').addEventListener('input', () => { saveFilters(); renderScripts(); });
-  $('#siteFilter').addEventListener('input', () => { saveFilters(); renderScripts(); });
-  $('#statusFilter').addEventListener('change', () => { saveFilters(); renderScripts(); });
-  $('#sortBy').addEventListener('change', () => { saveFilters(); renderScripts(); });
-  $('#btnNew').addEventListener('click', () => { location.href = 'editor.html#new='; });
-
-  // ---------------- import / export ----------------
-  async function fetchRequires(meta) {
-    let code = '';
-    const resources = {};
-    for (const url of meta.require || []) {
-      try { code += '\n;// @require ' + url + '\n' + (await send({ api: 'fetchText', args: [url] })); } catch (e) {}
-    }
-    for (const r of meta.resource || []) {
-      try { resources[r.name] = await send({ api: 'fetchText', args: [r.url] }); } catch (e) {}
-    }
-    return { code, resources };
-  }
-
-  async function saveScriptCode(code, sourceUrl) {
-    const meta = KV.parseMetadata(code);
-    if (!meta.name) throw new Error('No ==UserScript== block found in file');
-    const all = (await chrome.storage.local.get('scripts')).scripts || {};
-    const existing = Object.values(all).find((s) => s.namespace && s.namespace === meta.namespace && s.name === meta.name);
-    const id = existing ? existing.id : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-    const requires = await fetchRequires(meta);
-    all[id] = {
-      id, name: meta.name, namespace: meta.namespace, version: meta.version || '1.0',
-      description: meta.description, author: meta.author,
-      matches: meta.matches, includes: meta.includes, excludes: meta.excludes,
-      grants: meta.grants, runAt: meta.runAt || 'document-end', noframes: meta.noframes,
-      updateURL: meta.updateURL, downloadURL: meta.downloadURL || sourceUrl || '',
-      require: meta.require, requireCode: requires.code, resources: requires.resources,
-      enabled: true, code, sourceUrl: sourceUrl || '',
-      createdAt: existing ? existing.createdAt : Date.now(), updatedAt: Date.now()
-    };
-    await chrome.storage.local.set({ scripts: all });
-  }
-
-  $('#btnImport').addEventListener('click', () => $('#fileInput').click());
-  $('#fileInput').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    let count = 0, failed = 0;
-    for (const f of files) {
-      try {
-        if (/\.zip$/i.test(f.name)) {
-          const zip = await JSZip.loadAsync(f);
-          for (const name of Object.keys(zip.files)) {
-            if (/\.user\.js$/i.test(name)) {
-              try { await saveScriptCode(await zip.files[name].async('string'), ''); count++; } catch (e2) { failed++; }
-            }
-          }
-        } else {
-          await saveScriptCode(await f.text(), '');
-          count++;
-        }
-      } catch (e2) { failed++; }
-    }
-    alert('Import finished: ' + count + ' script(s) added' + (failed ? ', ' + failed + ' skipped' : '') + '.');
-    e.target.value = '';
-    renderScripts();
+// KingVamp Dashboard v2.0.0
+const $ = id => document.getElementById(id);
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const msg = (type, data = {}) => chrome.runtime.sendMessage({ type, ...data });
+const fmtTime = ts => new Date(ts).toLocaleTimeString();
+const fmtDate = ts => new Date(ts).toLocaleDateString();
+const fmtSize = b => b > 1048576 ? (b/1048576).toFixed(1)+'MB' : b > 1024 ? (b/1024).toFixed(1)+'KB' : b+'B';
+const editorUrl = id => chrome.runtime.getURL('pages/editor.html') + (id ? '?id='+id : '?new=1');
+let allScripts = {}, settings = {}, selectedId = null;
+let logs = [], netlog = [];
+const tabs = document.querySelectorAll('.tab');
+const panes = document.querySelectorAll('.tab-pane');
+function switchTab(name) {
+  tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  panes.forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
+  if (name === 'logs') loadLogs();
+  if (name === 'network') loadNetlog();
+  if (name === 'tools') loadTools();
+  if (name === 'settings') loadSettings();
+  if (name === 'ai') loadAiSettings();
+  history.replaceState(null, '', '#' + name);
+}
+tabs.forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+async function init() {
+  [allScripts, settings] = await Promise.all([msg('GET_SCRIPTS'), msg('GET_SETTINGS')]);
+  const gt = $('globalToggle');
+  gt.checked = settings.globalEnabled !== false;
+  updateHdrStatus(gt.checked);
+  gt.addEventListener('change', async () => { settings.globalEnabled = gt.checked; await msg('SAVE_SETTINGS', { settings }); updateHdrStatus(gt.checked); });
+  renderScripts();
+  const hash = location.hash.replace('#','') || 'scripts';
+  switchTab(hash);
+  chrome.runtime.onMessage.addListener(m => {
+    if (m._kv === 'LOG_NEW') { logs.unshift(m.entry); renderLogRow(m.entry); updateTabCount('tabCountLogs', logs.length); }
+    if (m._kv === 'NET_NEW') { netlog.unshift(m.entry); renderNetRow(m.entry); updateTabCount('tabCountNet', netlog.length); }
   });
-
-  $('#btnExport').addEventListener('click', async () => {
-    const scripts = Object.values((await chrome.storage.local.get('scripts')).scripts || {});
-    if (!scripts.length) { alert('Nothing to export yet.'); return; }
-    const zip = new JSZip();
-    for (const sc of scripts) zip.file((sc.name || 'script').replace(/[^\w.-]+/g, '_') + '.user.js', sc.code);
-    const blob = await zip.generateAsync({ type: 'blob' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'kingvamp-backup.zip';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  $('importFile').addEventListener('change', handleImportFiles);
+  $('btnImport').addEventListener('click', () => $('importFile').click());
+  $('btnExport').addEventListener('click', exportAllScripts);
+  $('btnNew').addEventListener('click', () => chrome.tabs.create({ url: editorUrl() }));
+  $('scriptSearch').addEventListener('input', renderScripts);
+  $('scriptSort').addEventListener('change', renderScripts);
+}
+function updateHdrStatus(active) { const b = $('hdrStatus'); b.textContent = active ? 'Active' : 'Paused'; b.className = active ? 'badge badge-green' : 'badge badge-muted'; }
+function updateTabCount(id, n) { const el = $(id); if (el) el.textContent = n || ''; }
+function renderScripts() {
+  const q = ($('scriptSearch')?.value || '').toLowerCase();
+  const sort = $('scriptSort')?.value || 'name';
+  const list = $('scriptList');
+  let arr = Object.values(allScripts);
+  if (q) arr = arr.filter(s => (s.meta?.name||'').toLowerCase().includes(q) || (s.meta?.description||'').toLowerCase().includes(q));
+  arr.sort((a,b) => {
+    if (sort === 'name') return (a.meta?.name||'').localeCompare(b.meta?.name||'');
+    if (sort === 'installed') return (b.installed||0) - (a.installed||0);
+    if (sort === 'updated') return (b.updated||0) - (a.updated||0);
+    if (sort === 'runs') return (b.runCount||0) - (a.runCount||0);
+    return 0;
   });
-
-  $('#btnUpdates').addEventListener('click', async () => {
-    const b = $('#btnUpdates');
-    b.disabled = true; b.textContent = 'Checking...';
-    try {
-      const r = await send({ api: 'checkUpdates', args: [] });
-      alert('Checked ' + r.checked + ' script(s). ' +
-        (r.updated.length ? 'Updated: ' + r.updated.join(', ') : 'Everything is up to date.') +
-        (r.failed.length ? ' Failed: ' + r.failed.join(', ') : ''));
-    } catch (e) { alert('Update check failed: ' + e.message); }
-    b.disabled = false; b.textContent = 'Check updates';
-    renderScripts();
-  });
-
-  // ---------------- privacy guard ----------------
-  async function renderPrivacy() {
-    const data = await chrome.storage.local.get(['netlog', 'scripts']);
-    const log = data.netlog || {};
-    const scripts = data.scripts || {};
-    const box = $('#netTable');
-    const ids = Object.keys(log).filter((id) => log[id].total > 0);
-    if (!ids.length) {
-      box.innerHTML = '<div class="empty-state"><p>No network activity recorded yet.<br>When any script talks to the internet, you will see exactly where it went, right here.</p></div>';
-      return;
-    }
-    let html = '<table><tr><th>Script</th><th>Servers contacted</th><th>Requests</th><th>Last activity</th></tr>';
-    for (const id of ids.sort((a, b) => log[b].lastAt - log[a].lastAt)) {
-      const e = log[id];
-      const name = scripts[id] ? scripts[id].name : '(deleted script)';
-      const domains = Object.entries(e.domains).sort((a, b) => b[1] - a[1]).slice(0, 6)
-        .map(([d, n]) => '<span class="tag">' + esc(d) + ' &times;' + n + '</span>').join(' ');
-      html += '<tr><td><b>' + esc(name) + '</b></td><td>' + domains + '</td><td>' + e.total + '</td><td>' + ago(e.lastAt) + '</td></tr>';
-    }
-    box.innerHTML = html + '</table>';
-  }
-  $('#btnClearLog').addEventListener('click', async () => {
-    await chrome.storage.local.set({ netlog: {} });
-    renderPrivacy();
-  });
-  // ---------------- console logs ----------------
-  async function renderLogs() {
-    const data = await chrome.storage.local.get(['logbuf', 'scripts']);
-    const buf = data.logbuf || {};
-    const scripts = data.scripts || {};
-    const box = $('#logView');
-    const ids = Object.keys(buf).filter((id) => buf[id].length);
-    if (!ids.length) {
-      box.innerHTML = '<div class="empty-state"><p>Nothing here yet.<br>When scripts log messages or hit errors, they show up here.</p></div>';
-      return;
-    }
-    box.innerHTML = '';
-    for (const id of ids) {
-      const name = scripts[id] ? scripts[id].name : '(deleted script)';
-      const group = document.createElement('div');
-      group.className = 'log-group';
-      group.innerHTML = '<h3>' + esc(name) + '</h3>';
-      for (const e of buf[id].slice(-30).reverse()) {
-        const line = document.createElement('div');
-        line.className = 'log-line' + (e.lvl === 'error' ? ' error' : '');
-        line.innerHTML = '<span class="t">' + new Date(e.t).toLocaleTimeString() + '</span><span class="m"></span>';
-        line.querySelector('.m').textContent = e.msg;
-        group.appendChild(line);
-      }
-      box.appendChild(group);
-    }
-  }
-  $('#btnClearLogs').addEventListener('click', async () => {
-    await chrome.storage.local.set({ logbuf: {} });
-    renderLogs();
-  });
-
-  // ---------------- tools: recipes ----------------
-  const RECIPES = [
-    {
-      slug: 'dark-mode', name: 'Dark mode everywhere',
-      desc: 'Gives every site a dark look. Easy on the eyes at night.',
-      code: [
-        '// ==UserScript==',
-        '// @name         Dark mode everywhere',
-        '// @namespace    kingvamp.recipe.dark-mode',
-        '// @version      1.0',
-        '// @description  Gives every site a dark look.',
-        '// @match        *://*/*',
-        '// @grant        GM_addStyle',
-        '// @run-at       document-start',
-        '// ==/UserScript==',
-        "GM_addStyle('html { filter: invert(0.92) hue-rotate(180deg) !important; background: #111 !important; } img, video, iframe, [style*=background-image] { filter: invert(1) hue-rotate(180deg) !important; }');"
-      ].join('\n')
-    },
-    {
-      slug: 'allow-copy', name: 'Allow copy, select & right-click',
-      desc: 'Stops sites from blocking text selection, copying and the right-click menu.',
-      code: [
-        '// ==UserScript==',
-        '// @name         Allow copy, select & right-click',
-        '// @namespace    kingvamp.recipe.allow-copy',
-        '// @version      1.0',
-        '// @description  Re-enables text selection, copying and right-click everywhere.',
-        '// @match        *://*/*',
-        '// @grant        GM_addStyle',
-        '// @run-at       document-start',
-        '// ==/UserScript==',
-        "GM_addStyle('* { -webkit-user-select: text !important; user-select: text !important; }');",
-        "['contextmenu','copy','cut','selectstart'].forEach(function(ev){",
-        "  window.addEventListener(ev, function(e){ e.stopImmediatePropagation(); }, true);",
-        "});"
-      ].join('\n')
-    },
-    {
-      slug: 'video-speed', name: 'Video speed keys',
-      desc: 'Press [ and ] to slow down or speed up any video, D resets to normal.',
-      code: [
-        '// ==UserScript==',
-        '// @name         Video speed keys',
-        '// @namespace    kingvamp.recipe.video-speed',
-        '// @version      1.0',
-        '// @description  [ slows down, ] speeds up, D resets video speed.',
-        '// @match        *://*/*',
-        '// @grant        none',
-        '// @run-at       document-end',
-        '// ==/UserScript==',
-        "document.addEventListener('keydown', function(e){",
-        "  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;",
-        "  var v = document.querySelector('video');",
-        "  if (!v) return;",
-        "  if (e.key === ']') v.playbackRate = Math.min(4, v.playbackRate + 0.25);",
-        "  if (e.key === '[') v.playbackRate = Math.max(0.25, v.playbackRate - 0.25);",
-        "  if (e.key.toLowerCase() === 'd') v.playbackRate = 1;",
-        "});"
-      ].join('\n')
-    },
-    {
-      slug: 'no-leave-popup', name: 'No "are you sure you want to leave" popups',
-      desc: 'Blocks those annoying dialogs when closing a tab.',
-      code: [
-        '// ==UserScript==',
-        '// @name         No leave-confirmation popups',
-        '// @namespace    kingvamp.recipe.no-leave-popup',
-        '// @version      1.0',
-        '// @description  Blocks are-you-sure-you-want-to-leave dialogs.',
-        '// @match        *://*/*',
-        '// @grant        none',
-        '// @run-at       document-start',
-        '// ==/UserScript==',
-        "window.addEventListener('beforeunload', function(e){",
-        "  e.stopImmediatePropagation();",
-        "  delete e.returnValue;",
-        "}, true);"
-      ].join('\n')
-    },
-    {
-      slug: 'auto-scroll', name: 'Auto-scroll (hands-free reading)',
-      desc: 'Press A to start/stop slow automatic scrolling. Shift+A scrolls faster.',
-      code: [
-        '// ==UserScript==',
-        '// @name         Auto-scroll',
-        '// @namespace    kingvamp.recipe.auto-scroll',
-        '// @version      1.0',
-        '// @description  Press A to toggle auto-scroll, Shift+A for faster.',
-        '// @match        *://*/*',
-        '// @grant        none',
-        '// @run-at       document-end',
-        '// ==/UserScript==',
-        "var timer = null, speed = 1;",
-        "document.addEventListener('keydown', function(e){",
-        "  if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;",
-        "  if (e.key.toLowerCase() !== 'a') return;",
-        "  if (timer) { clearInterval(timer); timer = null; return; }",
-        "  speed = e.shiftKey ? 4 : 1;",
-        "  timer = setInterval(function(){ window.scrollBy(0, speed); }, 30);",
-        "});"
-      ].join('\n')
-    }
-  ];
-
-  async function renderTools() {
-    const all = Object.values((await chrome.storage.local.get('scripts')).scripts || {});
-    const box = $('#recipes');
-    box.innerHTML = '';
-    for (const r of RECIPES) {
-      const added = all.some((s) => s.namespace === 'kingvamp.recipe.' + r.slug);
-      const div = document.createElement('div');
-      div.className = 'recipe';
-      div.innerHTML = '<div class="grow"><b>' + esc(r.name) + '</b><div class="desc">' + esc(r.desc) + '</div></div>';
-      const btn = document.createElement('button');
-      btn.className = 'btn small' + (added ? '' : ' primary');
-      btn.textContent = added ? 'Added' : 'Add';
-      btn.disabled = added;
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        try { await saveScriptCode(r.code, ''); } catch (e) {}
-        renderTools();
-        renderScripts();
-      });
-      div.appendChild(btn);
-      box.appendChild(div);
-    }
-
-    // hidden elements
-    const rules = (await chrome.storage.local.get('hiderules')).hiderules || {};
-    const hl = $('#hideList');
-    const hosts = Object.keys(rules);
-    hl.innerHTML = hosts.length ? '' : '<span class="muted">Nothing hidden yet. Use "Hide an element" from the KingVamp toolbar popup on any page.</span>';
-    for (const hostName of hosts) {
-      const div = document.createElement('div');
-      div.className = 'host-block';
-      div.innerHTML = '<h4>' + esc(hostName) + '</h4>';
-      for (const sel of rules[hostName]) {
-        const chip = document.createElement('span');
-        chip.className = 'sel-chip';
-        chip.textContent = sel.length > 60 ? sel.slice(0, 60) + '...' : sel;
-        const x = document.createElement('button');
-        x.textContent = 'x';
-        x.title = 'Unhide this element';
-        x.addEventListener('click', async () => {
-          await send({ api: 'removeHideRule', args: [hostName, sel] });
-          renderTools();
-        });
-        chip.appendChild(x);
-        div.appendChild(chip);
-      }
-      hl.appendChild(div);
-    }
-
-    renderBlocklist();
-  }
-
-  // ---------------- tools: blocklist ----------------
-  async function renderBlocklist() {
-    const list = await send({ api: 'getBlacklist', args: [] });
-    const bl = $('#blockList');
-    bl.innerHTML = (list && list.length) ? '' : '<span class="muted">No blocked sites.</span>';
-    for (const hostName of list || []) {
-      const chip = document.createElement('span');
-      chip.className = 'sel-chip';
-      chip.textContent = hostName;
-      const x = document.createElement('button');
-      x.textContent = 'x';
-      x.title = 'Unblock this site';
-      x.addEventListener('click', async () => {
-        await send({ api: 'setBlacklisted', args: [hostName, false] });
-        renderBlocklist();
-      });
-      chip.appendChild(x);
-      bl.appendChild(chip);
-    }
-  }
-  $('#btnBlock').addEventListener('click', async () => {
-    const hostName = $('#blockInput').value.trim().toLowerCase();
-    if (!hostName) return;
-    await send({ api: 'setBlacklisted', args: [hostName, true] });
-    $('#blockInput').value = '';
-    renderBlocklist();
-  });
-
-  // ---------------- AI writer ----------------
-  $('#btnAi').addEventListener('click', async () => {
-    const prompt = $('#aiPrompt').value.trim();
-    const status = $('#aiStatus');
-    if (!prompt) { status.textContent = 'Describe what the script should do first.'; return; }
-    const btn = $('#btnAi');
-    btn.disabled = true;
-    status.textContent = 'Writing your script...';
-    try {
-      const resp = await fetch(window.ADEMI_AI_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + window.ADEMI_AI_KEY },
-        body: JSON.stringify({
-          model: window.ADEMI_AI_MODEL,
-          messages: [
-            { role: 'system', content: 'You are KingVamp, a userscript generator. Reply with ONLY a complete userscript: a ==UserScript== block (with @name, @namespace, @version, @description, @match, @grant, @run-at) followed by clean working JavaScript. No markdown fences, no explanations, just the script.' },
-            { role: 'user', content: prompt }
-          ],
-          temperature: 0.4
-        })
-      });
-      if (resp.status === 402 || resp.status === 403) {
-        status.textContent = 'The AI wallet for this app is out of tokens or paused. You can top it up from the AI wallet in Ademi.';
-        return;
-      }
-      if (!resp.ok) throw new Error('AI request failed (HTTP ' + resp.status + ')');
-      const data = await resp.json();
-      let code = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
-      code = code.replace(/^```(?:javascript|js)?\s*/i, '').replace(/```\s*$/, '').trim();
-      if (!/==UserScript==/.test(code)) throw new Error('The AI did not return a valid userscript. Try rephrasing.');
-      await chrome.storage.local.set({ 'kv:draft': code });
-      status.textContent = 'Done - opening in the editor for your review.';
-      location.href = 'editor.html#draft';
-    } catch (e) {
-      status.textContent = e.message;
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  // ---------------- storage usage ----------------
-  if (chrome.storage.local.getBytesInUse) {
-    chrome.storage.local.getBytesInUse(null, (b) => {
-      $('#storageUsed').textContent = (b / 1024).toFixed(1) + ' KB used by scripts, values and logs';
-    });
-  }
-
-  loadSettings();
-  loadFilters().then(renderScripts);
-})();
+  updateTabCount('tabCountScripts', arr.length);
+  const statsRow = $('statsRow');
+  if (arr.length) {
+    statsRow.style.display = '';
+    const total=arr.length,enabled=arr.filter(s=>s.enabled).length,errors=arr.reduce((a,s)=>a+(s.errorCount||0),0),runs=arr.reduce((a,s)=>a+(s.runCount||0),0);
+    statsRow.innerHTML = `<div class="stat-tile"><div class="stat-value">${total}</div><div class="stat-label">Scripts</div></div><div class="stat-tile"><div class="stat-value" style="color:var(--green)">${enabled}</div><div class="stat-label">Active</div></div><div class="stat-tile"><div class="stat-value" style="color:var(--muted)">${total-enabled}</div><div class="stat-label">Disabled</div></div><div class="stat-tile"><div class="stat-value">${runs}</div><div class="stat-label">Total Runs</div></div><div class="stat-tile"><div class="stat-value" style="color:${errors?'var(--red)':'var(--text)'}">${errors}</div><div class="stat-label">Errors</div></div>`;
+  } else statsRow.style.display = 'none';
+  if (!arr.length) { list.innerHTML = `<div class="empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><div class="empty-title">${q?'No matching scripts':'No scripts installed'}</div><div class="empty-sub">${q?'Try a different search':'Click New Script or import a .user.js to get started'}</div></div>`; return; }
+  list.innerHTML = arr.map(s => {
+    const name=esc(s.meta?.name||s.id),desc=esc(s.meta?.description||''),ver=s.meta?.version?`<span class="badge badge-muted">v${esc(s.meta.version)}</span>`:'',runAt=s.meta?.['run-at']?`<span class="script-run-at">${esc(s.meta['run-at'])}</span>`:'',errs=s.errorCount?`<span class="badge badge-red">⚠ ${s.errorCount} err</span>`:'',runs=s.runCount?`<span style="font-size:10px;color:var(--muted2)">${s.runCount}×</span>`:'',icon=s.meta?.icon?`<img src="${esc(s.meta.icon)}" alt="" onerror="this.outerHTML='<span class=script-icon-letter>${(s.meta?.name||'?')[0].toUpperCase()}</span>'">`:`<span class="script-icon-letter">${(s.meta?.name||'?')[0].toUpperCase()}</span>`,matches=(s.meta?.match||[]).slice(0,2).map(m=>`<span class="tag">${esc(m)}</span>`).join('');
+    return `<div class="script-row${selectedId===s.id?' selected':''}" data-id="${s.id}"><div class="script-icon">${icon}</div><div class="script-info"><div class="script-name">${name}</div><div class="script-meta">${ver}${runAt}${errs}${runs}</div>${desc?`<div style="font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>`:''}<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${matches}</div></div><div class="script-actions"><button class="btn ghost icon" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><label class="switch"><input type="checkbox" class="stoggle" data-id="${s.id}" ${s.enabled?'checked':''}><span class="track"></span></label></div></div>`;
+  }).join('');
+  list.querySelectorAll('.script-row').forEach(el => { el.addEventListener('click', e => { if(e.target.closest('button,label,input'))return; selectScript(el.dataset.id); }); });
+  list.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => chrome.tabs.create({ url: editorUrl(el.dataset.edit) })));
+  list.querySelectorAll('.stoggle').forEach(el => el.addEventListener('change', async () => { await msg('TOGGLE_SCRIPT',{id:el.dataset.id,enabled:el.checked}); allScripts[el.dataset.id].enabled=el.checked; if(selectedId===el.dataset.id)showDetail(allScripts[el.dataset.id]); }));
+}
+function selectScript(id) { selectedId=id; document.querySelectorAll('.script-row').forEach(r=>r.classList.toggle('selected',r.dataset.id===id)); showDetail(allScripts[id]); }
+function showDetail(s) {
+  if (!s) return;
+  const panel=$('detailPanel'); panel.classList.remove('hidden');
+  const m=s.meta||{};
+  $('detailName').textContent=m.name||s.id; $('detailNs').textContent=m.namespace||''; $('detailEnabled').checked=s.enabled!==false;
+  $('detailIcon').innerHTML=m.icon?`<img src="${esc(m.icon)}" style="width:22px;height:22px;border-radius:4px" alt="">`:`<span class="script-icon-letter">${(m.name||'?')[0].toUpperCase()}</span>`;
+  const rows=[['Version',m.version?`v${m.version}`:'—'],['Author',m.author||'—'],['Run at',m['run-at']||'document-idle'],['Installed',fmtDate(s.installed)],['Updated',fmtDate(s.updated)],['Total Runs',(s.runCount||0).toLocaleString()],['Errors',(s.errorCount||0).toLocaleString()],...(m.match||[]).map((v,i)=>[i===0?'Match':'',v])].filter(([,v])=>v!==undefined);
+  $('detailMeta').innerHTML=rows.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+  const scan=s.scanResults||[];
+  $('detailScan').innerHTML=!scan.length?`<div class="scan-clean"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> No threats detected</div>`:scan.map(r=>`<div class="scan-item"><span class="scan-sev ${r.sev}">${r.sev}</span><span class="scan-msg">${esc(r.msg)}</span></div>`).join('');
+  $('detailEnabled').onchange=async()=>{await msg('TOGGLE_SCRIPT',{id:s.id,enabled:$('detailEnabled').checked});allScripts[s.id].enabled=$('detailEnabled').checked;renderScripts();};
+  $('detailEdit').onclick=()=>chrome.tabs.create({url:editorUrl(s.id)});
+  $('detailExport').onclick=()=>exportScript(s);
+  $('detailDelete').onclick=async()=>{ if(!confirm(`Delete "${m.name||s.id}"?`))return; await msg('DELETE_SCRIPT',{id:s.id}); delete allScripts[s.id]; panel.classList.add('hidden'); selectedId=null; renderScripts(); };
+  $('detailClose').onclick=()=>{ panel.classList.add('hidden'); selectedId=null; document.querySelectorAll('.script-row').forEach(r=>r.classList.remove('selected')); };
+}
+async function loadLogs() {
+  if (!logs.length) logs = await msg('GET_LOGS') || [];
+  const filtered = filterLogs(); $('logList').innerHTML = ''; filtered.slice(0,300).forEach(l=>renderLogRow(l));
+  updateTabCount('tabCountLogs', logs.length);
+  $('btnClearLogs').onclick=async()=>{await msg('CLEAR_LOGS');logs=[];$('logList').innerHTML='';updateTabCount('tabCountLogs',0);};
+  $('logSearch').oninput=renderFilteredLogs;
+  ['fLog','fInfo','fWarn','fError'].forEach(id=>{const el=$(id);if(el)el.onchange=renderFilteredLogs;});
+}
+function filterLogs() {
+  const q=($('logSearch')?.value||'').toLowerCase(),fLog=$('fLog')?.checked!==false,fInfo=$('fInfo')?.checked!==false,fWarn=$('fWarn')?.checked!==false,fErr=$('fError')?.checked!==false;
+  return logs.filter(l=>{if(!fLog&&l.level==='log')return false;if(!fInfo&&l.level==='info')return false;if(!fWarn&&l.level==='warn')return false;if(!fErr&&l.level==='error')return false;if(q&&!(l.msg||'').toLowerCase().includes(q)&&!(l.scriptName||'').toLowerCase().includes(q))return false;return true;});
+}
+function renderFilteredLogs(){$('logList').innerHTML='';filterLogs().slice(0,300).forEach(renderLogRow);}
+function renderLogRow(l){const el=document.createElement('div');el.className='log-row';el.innerHTML=`<span class="log-lv ${l.level||'log'}">${esc(l.level||'log')}</span><span class="log-time">${fmtTime(l.ts)}</span><span class="log-src">${esc((l.scriptName||'').slice(0,20))}</span><span class="log-msg">${esc(l.msg)}</span>`;$('logList')?.prepend(el);}
+async function loadNetlog(){
+  if(!netlog.length)netlog=await msg('GET_NETLOG')||[];
+  $('netList').innerHTML='';netlog.slice(0,200).forEach(renderNetRow);updateTabCount('tabCountNet',netlog.length);updateNetStats();
+  $('btnClearNet').onclick=async()=>{await msg('CLEAR_NETLOG');netlog=[];$('netList').innerHTML='';updateTabCount('tabCountNet',0);$('netStats').textContent='';};
+  $('netSearch').oninput=()=>{const q=$('netSearch').value.toLowerCase();$('netList').innerHTML='';netlog.filter(l=>(l.url||'').toLowerCase().includes(q)).slice(0,200).forEach(renderNetRow);};
+}
+function updateNetStats(){if(!netlog.length)return;const ok=netlog.filter(l=>l.status>=200&&l.status<300).length,err=netlog.filter(l=>l.status===0||l.status>=400).length;$('netStats').textContent=`${netlog.length} requests · ${ok} ok · ${err} errors`;}
+function renderNetRow(l){const status=l.status||0,cls=status>=200&&status<300?'ok':status>=400||status===0?'err':'pend',el=document.createElement('div');el.className='net-row';el.innerHTML=`<span class="net-method">${esc(l.method||'GET')}</span><span class="net-status ${cls}">${status||'—'}</span><span class="net-url" title="${esc(l.url||'')}">${esc(l.url||'')}</span><span class="net-script">${esc((allScripts[l.scriptId]?.meta?.name||l.scriptId||'').slice(0,18))}</span><span class="net-dur">${l.dur||0}ms</span><span class="net-size">${l.size?fmtSize(l.size):''}</span>`;$('netList')?.prepend(el);}
+const RECIPES=[
+  {name:'Auto-dismiss Cookie Banners',desc:'Hides cookie consent overlays on any site',code:`// ==UserScript==\n// @name         Cookie Banner Killer\n// @match        *://*/*\n// @run-at       document-end\n// @grant        GM_addStyle\n// ==/UserScript==\n(function(){\n  GM_addStyle('[class*="cookie"],[id*="cookie"],[class*="gdpr"],[class*="consent"],[id*="consent"],[class*="banner"]{display:none!important}');\n  new MutationObserver(()=>document.querySelectorAll('[class*="cookie"],[id*="cookie"]').forEach(el=>el.remove())).observe(document.body,{childList:true,subtree:true});\n})();`},
+  {name:'Dark Mode Everywhere',desc:'Force dark colors on any webpage',code:`// ==UserScript==\n// @name         Universal Dark Mode\n// @match        *://*/*\n// @run-at       document-start\n// @grant        GM_addStyle\n// ==/UserScript==\n(function(){\n  GM_addStyle('html{filter:invert(1) hue-rotate(180deg)!important}img,video,picture,canvas{filter:invert(1) hue-rotate(180deg)!important}');\n})();`},
+  {name:'URL Tracker Cleaner',desc:'Remove utm_*, fbclid, gclid tracking params',code:`// ==UserScript==\n// @name         URL Cleaner\n// @match        *://*/*\n// @run-at       document-start\n// @grant        none\n// ==/UserScript==\n(function(){\n  const PARAMS=['utm_source','utm_medium','utm_campaign','utm_term','utm_content','fbclid','gclid','msclkid'];\n  const url=new URL(location.href);let changed=false;\n  PARAMS.forEach(p=>{if(url.searchParams.has(p)){url.searchParams.delete(p);changed=true;}});\n  if(changed)history.replaceState(null,'',url.toString());\n})();`},
+  {name:'YouTube Speed Controls',desc:'Fine-grained playback speed for YouTube',code:`// ==UserScript==\n// @name         YouTube Speed Controls\n// @match        *://www.youtube.com/*\n// @run-at       document-idle\n// @grant        GM_addStyle\n// ==/UserScript==\n(function(){\n  GM_addStyle('#kv-speed{position:fixed;bottom:80px;right:20px;z-index:9999;background:#0a0a12;border:1px solid #e1062c;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;font-family:monospace}#kv-speed button{background:#16162a;border:1px solid #2e2e4a;color:#fff;border-radius:4px;padding:4px 10px;cursor:pointer}#kv-speed button:hover{background:#e1062c}');\n  const box=document.createElement('div');box.id='kv-speed';\n  [0.5,0.75,1,1.25,1.5,1.75,2].forEach(s=>{const b=document.createElement('button');b.textContent=s+'x';b.onclick=()=>{const v=document.querySelector('video');if(v)v.playbackRate=s;};box.appendChild(b);});\n  document.body.appendChild(box);\n})();`},
+  {name:'Back to Top Button',desc:'Adds a floating back-to-top button',code:`// ==UserScript==\n// @name         Back to Top Button\n// @match        *://*/*\n// @run-at       document-idle\n// @grant        GM_addStyle\n// ==/UserScript==\n(function(){\n  GM_addStyle('#kv-top{position:fixed;bottom:24px;right:24px;z-index:99999;width:40px;height:40px;border-radius:50%;background:#e1062c;color:#fff;border:none;cursor:pointer;font-size:18px;display:none;align-items:center;justify-content:center}');\n  const btn=document.createElement('button');btn.id='kv-top';btn.textContent='↑';btn.onclick=()=>window.scrollTo({top:0,behavior:'smooth'});\n  document.body.appendChild(btn);\n  window.addEventListener('scroll',()=>{btn.style.display=window.scrollY>300?'flex':'none'});\n})();`},
+  {name:'Custom CSS Injector',desc:'Inject your own CSS into any site',code:`// ==UserScript==\n// @name         Custom CSS Injector\n// @match        *://*/*\n// @run-at       document-start\n// @grant        GM_addStyle\n// @grant        GM_getValue\n// ==/UserScript==\n(function(){\n  GM_getValue('custom_css','').then(css=>{if(css)GM_addStyle(css);});\n})();`},
+];
+async function loadTools(){
+  $('recipeList').innerHTML=RECIPES.map((r,i)=>`<div class="recipe-item" data-idx="${i}"><div><div class="recipe-name">${esc(r.name)}</div><div class="recipe-desc">${esc(r.desc)}</div></div><button class="btn sm primary" data-idx="${i}">Use</button></div>`).join('');
+  $('recipeList').querySelectorAll('[data-idx]').forEach(el=>{el.addEventListener('click',e=>{const btn=e.target.closest('button');if(!btn)return;const r=RECIPES[btn.dataset.idx];chrome.tabs.create({url:editorUrl()+'&code='+encodeURIComponent(r.code)});});});
+  const hides=await msg('GET_HIDES')||{};
+  const hideList=$('hideList');
+  if(!Object.keys(hides).length){hideList.innerHTML='<span style="color:var(--muted);font-size:12px">No hidden elements yet.</span>';}else{hideList.innerHTML=`<table class="hide-table"><thead><tr><th>Site</th><th>Selector</th><th></th></tr></thead><tbody>${Object.entries(hides).flatMap(([site,sels])=>sels.map(sel=>`<tr><td>${esc(site)}</td><td>${esc(sel)}</td><td><button class="btn danger sm" data-site="${esc(site)}" data-sel="${esc(sel)}">×</button></td></tr>`)).join('')}</tbody></table>`;hideList.querySelectorAll('[data-site]').forEach(btn=>{btn.addEventListener('click',async()=>{await msg('CLEAR_HIDE',{url:btn.dataset.site,selector:btn.dataset.sel});loadTools();});});}
+  const scripts=Object.values(allScripts),sel=$('storageScriptSel');
+  sel.innerHTML=scripts.map(s=>`<option value="${s.id}">${esc(s.meta?.name||s.id)}</option>`).join('');
+  const loadStorage=async()=>{const id=sel.value,data=await msg('GET_STORAGE',{id})||{};$('storageTbody').innerHTML=Object.entries(data).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(typeof v==='object'?JSON.stringify(v):String(v))}</td></tr>`).join('')||'<tr><td colspan="2" style="color:var(--muted)">No values stored</td></tr>';};
+  sel.onchange=loadStorage;if(scripts.length)loadStorage();
+  $('btnClearStorage').onclick=async()=>{if(!confirm('Clear all stored values for this script?'))return;await msg('CLEAR_STORAGE',{id:sel.value});loadStorage();};
+  $('btnExportZip').onclick=()=>exportZip();$('btnExportJson').onclick=()=>exportJson();
+  $('btnImportJson').onclick=()=>$('backupFile').click();$('backupFile').onchange=e=>importJson(e.target.files[0]);
+  $('btnCheckUpdates').onclick=async()=>{$('btnCheckUpdates').textContent='Checking…';$('btnCheckUpdates').disabled=true;await msg('CHECK_UPDATES');$('btnCheckUpdates').textContent='Check for Updates';$('btnCheckUpdates').disabled=false;$('updateResult').textContent='Update check complete.'};
+}
+let aiGenerated='';
+async function loadAiSettings(){
+  const s=await msg('GET_SETTINGS');
+  $('aiKey').value=s.aiKey||'';$('aiEndpoint').value=s.aiEndpoint||'https://api.openai.com/v1/chat/completions';$('aiModel').value=s.aiModel||'gpt-4o';
+  $('btnSaveAi').onclick=async()=>{await msg('SAVE_SETTINGS',{settings:{...s,aiKey:$('aiKey').value,aiEndpoint:$('aiEndpoint').value,aiModel:$('aiModel').value}});$('btnSaveAi').textContent='Saved!';setTimeout(()=>{$('btnSaveAi').textContent='Save API Settings';},1500);};
+  $('btnAiGenerate').onclick=generateScript;
+  $('btnAiInstall').onclick=async()=>{if(!aiGenerated)return;await msg('SAVE_SCRIPT',{code:aiGenerated});allScripts=await msg('GET_SCRIPTS');renderScripts();switchTab('scripts');};
+}
+async function generateScript(){
+  const prompt=$('aiPrompt').value.trim();if(!prompt)return;
+  const s=await msg('GET_SETTINGS'),apiKey=s.aiKey||'',endpoint=s.aiEndpoint||'https://api.openai.com/v1/chat/completions',model=s.aiModel||'gpt-4o';
+  if(!apiKey){alert('Please configure your API key in the AI Settings section.');return;}
+  const btn=$('btnAiGenerate');btn.disabled=true;btn.textContent='Generating…';
+  const out=$('aiOutput');out.className='ai-output';out.textContent='Calling API…';
+  try{
+    const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({model,messages:[{role:'system',content:'You are an expert userscript developer. Write a complete Tampermonkey-compatible userscript. Output ONLY raw code starting with // ==UserScript==.'},{role:'user',content:`Write a userscript that: ${prompt}${$('aiSite').value?`\nTarget site: ${$('aiSite').value}`:''}\nRun at: ${$('aiRunAt').value}`}],temperature:0.7})});
+    if(!res.ok)throw new Error(`API error ${res.status}`);
+    const data=await res.json();aiGenerated=(data.choices?.[0]?.message?.content||'').trim();
+    out.textContent=aiGenerated;$('btnAiInstall').disabled=!aiGenerated;
+  }catch(e){out.textContent='Error: '+e.message;aiGenerated='';}
+  finally{btn.disabled=false;btn.textContent='Generate Script';}
+}
+async function loadSettings(){
+  const s=await msg('GET_SETTINGS'),siteSettings=await msg('GET_SITE_SETTINGS')||{};
+  $('setGlobal').checked=s.globalEnabled!==false;$('setBadge').checked=s.showBadge!==false;$('setAutoUpdate').checked=s.autoUpdate!==false;$('setLogLimit').value=s.logLimit||500;
+  const blocked=Object.entries(siteSettings).filter(([,v])=>v?.disabled).map(([k])=>k);
+  renderBlocklist(blocked,siteSettings);
+  $('btnAddBlock').onclick=async()=>{const host=$('blocklistInput').value.trim().replace(/^https?:\/\//,'').split('/')[0];if(!host)return;siteSettings[host]={...siteSettings[host],disabled:true};await msg('SAVE_SITE_SETTINGS',{siteSettings});$('blocklistInput').value='';loadSettings();};
+  chrome.storage.local.getBytesInUse(null,bytes=>{$('storageInfo').innerHTML=`<div class="setting-row"><div class="setting-info"><div class="setting-name">Local Storage Used</div><div class="setting-desc">Scripts, logs, values, settings</div></div><span style="font-family:var(--mono);font-size:13px">${(bytes/1024).toFixed(1)} KB</span></div>`;});
+  $('btnSaveSettings').onclick=async()=>{const updated={...s,globalEnabled:$('setGlobal').checked,showBadge:$('setBadge').checked,autoUpdate:$('setAutoUpdate').checked,logLimit:parseInt($('setLogLimit').value)||500};await msg('SAVE_SETTINGS',{settings:updated});updateHdrStatus(updated.globalEnabled);$('btnSaveSettings').textContent='Saved!';setTimeout(()=>{$('btnSaveSettings').textContent='Save Settings';},1500);};
+  $('btnResetSettings').onclick=async()=>{if(!confirm('Reset all settings to defaults?'))return;await msg('SAVE_SETTINGS',{settings:{globalEnabled:true,autoUpdate:true,showBadge:true,logLimit:500}});loadSettings();};
+}
+function renderBlocklist(blocked,siteSettings){
+  const el=$('blocklistRows');if(!blocked.length){el.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No blocked domains</div>';return;}
+  el.innerHTML=blocked.map(h=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)"><span style="flex:1;font-family:var(--mono);font-size:12px">${esc(h)}</span><button class="btn danger sm" data-host="${esc(h)}">Remove</button></div>`).join('');
+  el.querySelectorAll('[data-host]').forEach(btn=>{btn.onclick=async()=>{delete siteSettings[btn.dataset.host];await msg('SAVE_SITE_SETTINGS',{siteSettings});loadSettings();};});
+}
+async function handleImportFiles(e){
+  for(const file of e.target.files){const code=await file.text();await msg('SAVE_SCRIPT',{code,sourceUrl:file.name});}
+  allScripts=await msg('GET_SCRIPTS');renderScripts();e.target.value='';
+}
+function exportScript(s){const blob=new Blob([s.code],{type:'text/javascript'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(s.meta?.name||s.id).replace(/[^\w.-]/g,'_')+'.user.js';a.click();}
+function exportAllScripts(){const scripts=Object.values(allScripts);if(!scripts.length)return;const blob=new Blob([scripts.map(s=>`// FILE: ${s.meta?.name||s.id}.user.js\n${s.code}`).join('\n\n// ---\n\n')],{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='KingVamp_scripts.txt';a.click();}
+async function exportJson(){const blob=new Blob([JSON.stringify({version:'2.0.0',exported:new Date().toISOString(),scripts:allScripts},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.json';a.click();}
+async function exportZip(){const scripts=Object.values(allScripts),parts=['KingVamp Backup\n=====\n\n',JSON.stringify({version:'2.0.0',exported:new Date().toISOString()},null,2),'\n\n'];scripts.forEach(s=>parts.push(`\n--- ${s.meta?.name||s.id} ---\n${s.code}\n`));const blob=new Blob(parts,{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.txt';a.click();}
+async function importJson(file){if(!file)return;try{const data=JSON.parse(await file.text()),scripts=data.scripts||{};let count=0;for(const s of Object.values(scripts)){if(s.code){await msg('SAVE_SCRIPT',{code:s.code,sourceUrl:'backup'});count++;}}allScripts=await msg('GET_SCRIPTS');renderScripts();alert(`Imported ${count} scripts.`);}catch(e){alert('Import failed: '+e.message);}}
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',async e=>{e.preventDefault();const files=[...e.dataTransfer.files].filter(f=>f.name.endsWith('.js'));for(const file of files)await msg('SAVE_SCRIPT',{code:await file.text(),sourceUrl:file.name});if(files.length){allScripts=await msg('GET_SCRIPTS');renderScripts();switchTab('scripts');}});
+init().catch(console.error);

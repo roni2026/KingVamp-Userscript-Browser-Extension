@@ -1,215 +1,307 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>KingVamp Dashboard</title>
   <link rel="stylesheet" href="../assets/theme.css">
   <style>
-    body { min-width: 720px; }
-    .tabs { display: flex; gap: 4px; padding: 0 18px; background: #0d0d14; border-bottom: 1px solid var(--border); }
-    .tab { padding: 10px 18px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; font-size: 13px; }
-    .tab:hover { color: var(--text); }
-    .tab.active { color: var(--red2); border-bottom-color: var(--red); }
-    main { padding: 20px 24px; max-width: 1000px; margin: 0 auto; }
-    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-    .filter-row { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
-    .filter-row .f-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin-bottom: 8px; }
-    .filter-row .f-grid { display: grid; grid-template-columns: 1.4fr 1.2fr 1fr 1fr; gap: 8px; }
-    .filter-row .f-count { margin-top: 8px; font-size: 12px; }
-    .script-card { display: flex; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
-    .script-card.disabled { opacity: .55; }
-    .script-card .grow { flex: 1; min-width: 0; }
-    .script-card h3 { margin: 0 0 3px; font-size: 15px; }
-    .script-card .meta { font-size: 12px; color: var(--muted); }
-    .script-card .btns { display: flex; gap: 6px; }
-    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
-    .empty-state h2 { color: var(--text); }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
-    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
-    .privacy-note { background: #101a13; border: 1px solid #1d3a28; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
-    .privacy-note b { color: var(--good); }
-    .hidden { display: none !important; }
-    .row { display: flex; gap: 10px; align-items: center; }
-    .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
-    .settings-row .desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
-    h2.section { font-size: 16px; margin: 22px 0 10px; }
-    .recipe { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--panel2); }
-    .recipe .grow { flex: 1; }
-    .recipe b { display: block; }
-    .recipe .desc { font-size: 12px; color: var(--muted); }
-    .log-line { display: flex; gap: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 5px 10px; border-bottom: 1px solid #1b1b28; }
-    .log-line .t { color: var(--muted); flex: none; }
-    .log-line.error .m { color: var(--red2); }
-    .log-group { margin-bottom: 18px; }
-    .log-group h3 { font-size: 13px; margin: 0 0 6px; color: var(--text); }
-    .sel-chip { display: inline-flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; margin: 3px 4px 3px 0; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
-    .sel-chip button { background: none; border: none; color: var(--red2); cursor: pointer; font-size: 13px; padding: 0 2px; }
-    .host-block { margin-bottom: 14px; }
-    .host-block h4 { margin: 0 0 6px; font-size: 13px; }
+    html,body{height:100%}
+    body{display:flex;flex-direction:column;min-height:100vh}
+    #app{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+    .main{display:flex;flex:1;overflow:hidden}
+    .content{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+    #scriptList .script-row{cursor:default}
+    .script-row.selected{background:var(--bg3)}
+    .script-row .script-run-at{font-family:var(--mono);font-size:10px}
+    .search-wrap{position:relative;flex:1;max-width:260px}
+    .search-wrap input{padding-left:30px;width:100%}
+    .search-wrap svg{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+    .detail-panel{width:320px;border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;background:var(--card);flex-shrink:0}
+    .detail-panel.hidden{display:none}
+    .detail-head{padding:14px 16px;border-bottom:1px solid var(--border)}
+    .detail-meta-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+    .detail-meta-grid dt{color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:0.5px}
+    .detail-meta-grid dd{color:var(--text);word-break:break-all}
+    .detail-actions{padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border)}
+    .scan-box{padding:14px 16px}
+    .scan-clean{color:var(--green);font-size:12px;display:flex;align-items:center;gap:8px}
+    #logPanel .log-row{cursor:default}
+    .log-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg2);flex-wrap:wrap}
+    .log-filter-row{display:flex;gap:6px}
+    .net-head-row{display:flex;gap:8px;padding:4px 12px 5px;border-bottom:1px solid var(--border);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted2);font-family:var(--mono)}
+    .tools-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:20px}
+    .tool-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+    .tool-card h3{margin-bottom:10px;font-size:13px;display:flex;align-items:center;gap:8px}
+    .tool-card h3 svg{color:var(--red)}
+    .recipe-list{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+    .recipe-item{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg3);border-radius:var(--r-sm);border:1px solid var(--border);cursor:pointer;transition:all var(--t)}
+    .recipe-item:hover{background:var(--border);border-color:var(--border2)}
+    .recipe-name{font-size:12px;font-weight:600;flex:1}
+    .recipe-desc{font-size:11px;color:var(--muted)}
+    .hide-table{width:100%;border-collapse:collapse;font-size:12px}
+    .hide-table th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted2);padding:6px 8px;border-bottom:1px solid var(--border)}
+    .hide-table td{padding:6px 8px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;word-break:break-all}
+    .hide-table tr:last-child td{border-bottom:none}
+    .ai-panel{padding:20px;max-width:700px;margin:0 auto}
+    .ai-panel .card{padding:20px}
+    .ai-output{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;font-family:var(--mono);font-size:12px;min-height:200px;white-space:pre-wrap;word-break:break-all;color:var(--text);overflow-y:auto;max-height:400px;margin-top:12px}
+    .ai-output.empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-family:var(--font)}
+    .settings-panel{padding:20px;max-width:600px}
+    .settings-section{margin-bottom:28px}
+    .settings-section h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);margin-bottom:14px}
+    .storage-table{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
+    .storage-table th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted2);padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg2)}
+    .storage-table td{padding:7px 10px;border-bottom:1px solid var(--border);word-break:break-all}
+    .drop-zone{border:2px dashed var(--border2);border-radius:var(--r);padding:32px;text-align:center;color:var(--muted);cursor:pointer;transition:all var(--t)}
+    .drop-zone:hover,.drop-zone.drag-over{border-color:var(--red);background:var(--red-gl);color:var(--red)}
   </style>
 </head>
 <body>
+<div id="app">
   <div class="kv-head">
     <div class="logo">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-        <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
-        <path d="M8 20 L9.5 20 L8.75 23 Z M14.5 20 L16 20 L15.25 23 Z" fill="#eceaf2"/>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path d="M3 18L3 7L8 11L12 4L16 11L21 7L21 18Z" fill="#e1062c"/>
+        <path d="M8 20L9.5 20L8.75 23ZM14.5 20L16 20L15.25 23Z" fill="#eceaf2"/>
       </svg>
       <div class="brand">
-        <div class="brand-name">King<span class="vamp">Vamp</span> <span class="by">by Roni</span></div>
+        <div class="brand-name">King<span class="vamp">Vamp</span><span class="by">by Roni</span></div>
         <div class="brand-tag">privacy-first userscript manager</div>
       </div>
     </div>
     <div class="kv-spacer"></div>
-    <label class="row" style="font-size:12px;color:var(--muted)" title="Master switch - pauses every script everywhere">
-      <span id="freezeLabel">Active</span>
-      <span class="switch"><input type="checkbox" id="globalToggle" checked><span class="track"></span></span>
-    </label>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="hdrStatus" class="badge badge-green">Active</span>
+      <label class="switch" title="Master switch">
+        <input type="checkbox" id="globalToggle" checked>
+        <span class="track"></span>
+      </label>
+    </div>
   </div>
 
-  <div class="tabs">
-    <div class="tab active" data-tab="scripts">Scripts</div>
-    <div class="tab" data-tab="privacy">Privacy Guard</div>
-    <div class="tab" data-tab="logs">Console</div>
-    <div class="tab" data-tab="tools">Tools</div>
-    <div class="tab" data-tab="ai">AI Script Writer</div>
-    <div class="tab" data-tab="settings">Settings</div>
+  <div class="tabs" role="tablist">
+    <button class="tab active" data-tab="scripts" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      Scripts <span class="tab-count" id="tabCountScripts"></span>
+    </button>
+    <button class="tab" data-tab="logs" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Console <span class="tab-count" id="tabCountLogs"></span>
+    </button>
+    <button class="tab" data-tab="network" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      Network <span class="tab-count" id="tabCountNet"></span>
+    </button>
+    <button class="tab" data-tab="tools" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+      Tools
+    </button>
+    <button class="tab" data-tab="ai" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+      AI Writer
+    </button>
+    <button class="tab" data-tab="settings" role="tab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </button>
   </div>
 
-  <main>
-    <!-- SCRIPTS -->
-    <section id="tab-scripts">
-      <div class="filter-row">
-        <div class="f-title">Filter</div>
-        <div class="f-grid">
-          <input type="search" id="search" placeholder="Filter by name or description...">
-          <input type="search" id="siteFilter" placeholder="Filter by site (e.g. youtube)">
-          <select id="statusFilter">
-            <option value="all">All scripts</option>
-            <option value="enabled">Enabled only</option>
-            <option value="disabled">Disabled only</option>
+  <div class="main">
+    <div class="content">
+      <!-- SCRIPTS -->
+      <div class="tab-pane active" id="pane-scripts">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="scriptSearch" placeholder="Search scripts…">
+          </div>
+          <select id="scriptSort" style="font-size:12px;padding:6px 8px">
+            <option value="name">Name</option>
+            <option value="installed">Date installed</option>
+            <option value="updated">Last updated</option>
+            <option value="runs">Run count</option>
           </select>
-          <select id="sortBy">
-            <option value="name">Sort: Name (A-Z)</option>
-            <option value="updated">Sort: Recently updated</option>
-            <option value="lastrun">Sort: Last run</option>
-            <option value="runs">Sort: Most runs</option>
-          </select>
+          <div class="toolbar-spacer"></div>
+          <div class="btn-group">
+            <button class="btn" id="btnImport">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Import
+            </button>
+            <button class="btn" id="btnExport">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Export All
+            </button>
+            <button class="btn primary" id="btnNew">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              New Script
+            </button>
+          </div>
         </div>
-        <div class="f-count muted" id="filterCount"></div>
+        <div id="statsRow" class="stats-grid" style="display:none"></div>
+        <div id="scriptList" class="scroll-area" style="max-height:none;flex:1"></div>
+        <input type="file" id="importFile" accept=".js,.user.js" multiple style="display:none">
       </div>
-      <div class="toolbar">
-        <div class="kv-spacer"></div>
-        <button class="btn" id="btnImport">Import</button>
-        <button class="btn" id="btnExport">Export all</button>
-        <button class="btn" id="btnUpdates">Check updates</button>
-        <button class="btn primary" id="btnNew">+ New script</button>
-        <input type="file" id="fileInput" accept=".zip,.js,.txt" multiple class="hidden">
-      </div>
-      <div id="scriptList"></div>
-    </section>
 
-    <!-- PRIVACY -->
-    <section id="tab-privacy" class="hidden">
-      <div class="privacy-note">
-        <b>KingVamp runs 100% on your device.</b><br>
-        <span class="muted">No accounts, no analytics, no telemetry - nothing is ever sent anywhere by KingVamp itself.
-        Below you can see exactly which servers your <i>scripts</i> talked to, so no script can secretly steal your data.</span>
-      </div>
-      <div class="toolbar">
-        <h2 class="section" style="margin:0">Script network activity</h2>
-        <div class="kv-spacer"></div>
-        <button class="btn danger" id="btnClearLog">Clear log</button>
-      </div>
-      <div class="panel"><div id="netTable"></div></div>
-    </section>
-
-    <!-- CONSOLE / LOGS -->
-    <section id="tab-logs" class="hidden">
-      <div class="toolbar">
-        <h2 class="section" style="margin:0">Script console</h2>
-        <div class="kv-spacer"></div>
-        <button class="btn danger" id="btnClearLogs">Clear all</button>
-      </div>
-      <p class="muted" style="margin-top:0">Messages from GM_log() and script errors land here, so nothing fails silently.</p>
-      <div class="panel"><div id="logView"></div></div>
-    </section>
-
-    <!-- TOOLS -->
-    <section id="tab-tools" class="hidden">
-      <h2 class="section" style="margin-top:0">Ready-made recipes</h2>
-      <p class="muted">Useful mini-scripts, reviewed by KingVamp. One click adds them - no copying code, no websites needed.</p>
-      <div id="recipes"></div>
-
-      <h2 class="section">Hidden elements</h2>
-      <p class="muted">Things you removed with "Hide an element" from the toolbar popup. They stay hidden on every visit.</p>
-      <div class="panel"><div id="hideList"></div></div>
-
-      <h2 class="section">Blocked sites</h2>
-      <p class="muted">KingVamp never runs scripts on these sites.</p>
-      <div class="row" style="margin-bottom:10px">
-        <input type="text" id="blockInput" placeholder="example.com" style="max-width:260px">
-        <button class="btn" id="btnBlock">Block site</button>
-      </div>
-      <div class="panel"><div id="blockList"></div></div>
-    </section>
-
-    <!-- AI -->
-    <section id="tab-ai" class="hidden">
-      <div class="panel">
-        <h2 class="section" style="margin-top:0">Describe it, KingVamp writes it</h2>
-        <p class="muted">Tell KingVamp what you want a script to do in plain words. It writes a ready-to-use userscript and opens it in the editor so you can review every line before installing.</p>
-        <textarea id="aiPrompt" rows="4" placeholder="Example: On youtube.com, remove the shorts shelf from the homepage and hide comments"></textarea>
-        <div class="row" style="margin-top:10px">
-          <button class="btn primary" id="btnAi">Write my script</button>
-          <span class="muted" id="aiStatus"></span>
+      <!-- LOGS -->
+      <div class="tab-pane" id="pane-logs">
+        <div class="log-toolbar">
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="logSearch" placeholder="Filter logs…">
+          </div>
+          <div class="log-filter-row">
+            <label><input type="checkbox" id="fLog" checked> <span style="color:var(--muted)">log</span></label>
+            <label><input type="checkbox" id="fInfo" checked> <span style="color:var(--blue)">info</span></label>
+            <label><input type="checkbox" id="fWarn" checked> <span style="color:var(--yellow)">warn</span></label>
+            <label><input type="checkbox" id="fError" checked> <span style="color:var(--red)">error</span></label>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <button class="btn ghost sm" id="btnClearLogs">Clear All</button>
         </div>
-        <div id="aiOut"></div>
+        <div id="logList" class="scroll-area"></div>
       </div>
-    </section>
 
-    <!-- SETTINGS -->
-    <section id="tab-settings" class="hidden">
-      <div class="panel">
-        <h2 class="section" style="margin-top:0">Settings</h2>
-        <div class="settings-row">
-          <div><b>Scripts enabled</b><div class="desc">Master switch for every script on every site.</div></div>
-          <span class="switch"><input type="checkbox" id="setGlobal"><span class="track"></span></span>
+      <!-- NETWORK -->
+      <div class="tab-pane" id="pane-network">
+        <div class="log-toolbar">
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search" id="netSearch" placeholder="Filter URLs…">
+          </div>
+          <div class="toolbar-spacer"></div>
+          <span id="netStats" style="font-size:11px;color:var(--muted)"></span>
+          <button class="btn ghost sm" id="btnClearNet">Clear</button>
         </div>
-        <div class="settings-row">
-          <div><b>Automatic update checks</b><div class="desc">Check @updateURL / @downloadURL twice a day.</div></div>
-          <span class="switch"><input type="checkbox" id="setAutoUpdate"><span class="track"></span></span>
+        <div class="net-head-row">
+          <span style="width:52px">Method</span><span style="width:38px">Status</span>
+          <span style="flex:1">URL</span><span style="width:110px">Script</span>
+          <span style="width:52px;text-align:right">Time</span><span style="width:58px;text-align:right">Size</span>
         </div>
-        <div class="settings-row">
-          <div><b>Badge counter</b><div class="desc">Show how many scripts ran on the current page.</div></div>
-          <span class="switch"><input type="checkbox" id="setBadge"><span class="track"></span></span>
-        </div>
-        <div class="settings-row">
-          <div><b>Keyboard shortcut</b><div class="desc">Cmd+Shift+K (Mac) or Ctrl+Shift+K opens this dashboard.</div></div>
-          <span></span>
-        </div>
-        <div class="settings-row">
-          <div><b>Storage used</b><div class="desc" id="storageUsed">-</div></div>
-          <span></span>
+        <div id="netList" class="scroll-area"></div>
+      </div>
+
+      <!-- TOOLS -->
+      <div class="tab-pane" id="pane-tools">
+        <div class="tools-grid">
+          <div class="tool-card">
+            <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>Script Templates</h3>
+            <div class="recipe-list" id="recipeList"></div>
+          </div>
+          <div class="tool-card">
+            <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Hidden Elements</h3>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Elements hidden via the element picker across all sites.</p>
+            <div id="hideList"><span style="color:var(--muted);font-size:12px">No hidden elements yet.</span></div>
+          </div>
+          <div class="tool-card" style="grid-column:1/-1">
+            <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Script Storage</h3>
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+              <select id="storageScriptSel" style="flex:1;font-size:12px;padding:6px 8px"></select>
+              <button class="btn sm danger" id="btnClearStorage">Clear Selected</button>
+            </div>
+            <div style="overflow-x:auto"><table class="storage-table" id="storageTable"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody id="storageTbody"></tbody></table></div>
+          </div>
+          <div class="tool-card">
+            <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/></svg>Backup &amp; Restore</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" id="btnExportZip">Export .zip</button>
+              <button class="btn" id="btnExportJson">Export .json</button>
+              <button class="btn" id="btnImportJson">Import backup</button>
+            </div>
+            <input type="file" id="backupFile" accept=".json" style="display:none">
+          </div>
+          <div class="tool-card">
+            <h3><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>Script Updater</h3>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Check all scripts with @updateURL for new versions.</p>
+            <button class="btn" id="btnCheckUpdates">Check for Updates</button>
+            <div id="updateResult" style="margin-top:10px;font-size:12px;color:var(--green)"></div>
+          </div>
         </div>
       </div>
-      <div class="panel" style="margin-top:16px">
-        <h2 class="section" style="margin-top:0">The KingVamp promise</h2>
-        <p class="muted" style="margin-bottom:0">
-          Other script managers have been caught collecting browsing data. KingVamp is built the opposite way:
-          everything - your scripts, settings, values and logs - lives only in this browser on this device.
-          There is no KingVamp server that receives anything. You can verify this yourself in the Privacy Guard tab:
-          KingVamp never appears there, because it never phones home.
-        </p>
-      </div>
-    </section>
-  </main>
 
-  <script src="../lib/jszip.min.js"></script>
-  <script src="../src/match.js"></script>
-  <script src="../src/audit.js"></script>
-  <script src="../ai-config.js"></script>
-  <script src="dashboard.js"></script>
+      <!-- AI -->
+      <div class="tab-pane" id="pane-ai">
+        <div class="ai-panel">
+          <div class="card">
+            <h2 style="margin-bottom:4px">AI Script Writer</h2>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Describe what you want your userscript to do in plain English.</p>
+            <div class="form-group"><label>What should the script do?</label><textarea id="aiPrompt" rows="4" placeholder="e.g. Automatically dismiss cookie consent banners on all websites"></textarea></div>
+            <div class="form-row" style="margin-bottom:14px">
+              <div class="form-group" style="margin-bottom:0"><label>Target site (optional)</label><input type="text" id="aiSite" placeholder="e.g. example.com"></div>
+              <div class="form-group" style="margin-bottom:0"><label>Run at</label><select id="aiRunAt"><option value="document-idle">document-idle</option><option value="document-end">document-end</option><option value="document-start">document-start</option></select></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn primary" id="btnAiGenerate">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Generate Script
+              </button>
+              <button class="btn" id="btnAiInstall" disabled>Install Generated</button>
+            </div>
+            <div id="aiOutput" class="ai-output empty" style="margin-top:16px">Generated script will appear here…</div>
+          </div>
+          <div class="card" style="margin-top:16px">
+            <h3 style="margin-bottom:10px">API Configuration</h3>
+            <div class="form-row">
+              <div class="form-group" style="margin-bottom:0"><label>API Key</label><input type="text" id="aiKey" placeholder="sk-…"></div>
+              <div class="form-group" style="margin-bottom:0"><label>Endpoint</label><input type="url" id="aiEndpoint" value="https://api.openai.com/v1/chat/completions"></div>
+            </div>
+            <div class="form-group" style="margin-top:12px;margin-bottom:0"><label>Model</label><input type="text" id="aiModel" value="gpt-4o"></div>
+            <button class="btn sm primary" id="btnSaveAi" style="margin-top:12px">Save API Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="tab-pane" id="pane-settings">
+        <div class="settings-panel">
+          <div class="settings-section"><h2>General</h2>
+            <div class="card">
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Master Switch</div><div class="setting-desc">Enable or disable all userscripts globally</div></div><label class="switch"><input type="checkbox" id="setGlobal"><span class="track"></span></label></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Show Badge Count</div><div class="setting-desc">Show how many scripts run on the current tab</div></div><label class="switch"><input type="checkbox" id="setBadge"><span class="track"></span></label></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Auto-Update Scripts</div><div class="setting-desc">Check @updateURL every 12 hours automatically</div></div><label class="switch"><input type="checkbox" id="setAutoUpdate"><span class="track"></span></label></div>
+            </div>
+          </div>
+          <div class="settings-section"><h2>Console &amp; Logging</h2>
+            <div class="card"><div class="setting-row"><div class="setting-info"><div class="setting-name">Max Log Entries</div><div class="setting-desc">Trim the console log to this many entries</div></div><input type="text" id="setLogLimit" style="width:80px;text-align:right"></div></div>
+          </div>
+          <div class="settings-section"><h2>Site Blocklist</h2>
+            <div class="card">
+              <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Domains where KingVamp is always disabled.</p>
+              <div id="blocklistRows"></div>
+              <div style="display:flex;gap:8px;margin-top:10px"><input type="text" id="blocklistInput" placeholder="example.com" style="flex:1"><button class="btn sm" id="btnAddBlock">Add</button></div>
+            </div>
+          </div>
+          <div class="settings-section"><h2>Storage Info</h2><div class="card" id="storageInfo"></div></div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn primary" id="btnSaveSettings">Save Settings</button>
+            <button class="btn danger" id="btnResetSettings">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail panel -->
+    <div class="detail-panel hidden" id="detailPanel">
+      <div class="detail-head">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div class="script-icon" id="detailIcon" style="width:36px;height:36px"></div>
+          <div style="flex:1;min-width:0"><div id="detailName" style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div><div id="detailNs" style="font-size:11px;color:var(--muted);margin-top:1px"></div></div>
+          <button class="btn ghost icon" id="detailClose"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <label class="switch"><input type="checkbox" id="detailEnabled"><span class="track"></span></label>
+      </div>
+      <dl class="detail-meta-grid" id="detailMeta"></dl>
+      <div class="detail-actions">
+        <button class="btn sm" id="detailEdit">Edit</button>
+        <button class="btn sm" id="detailExport">Export</button>
+        <button class="btn sm danger" id="detailDelete">Delete</button>
+      </div>
+      <div class="scan-box">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted2);margin-bottom:10px">Safety Scan</div>
+        <div id="detailScan"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="dashboard.js"></script>
 </body>
 </html>
