@@ -1,25 +1,10 @@
 {
   "manifest_version": 3,
   "name": "KingVamp",
-  "version": "1.2.0",
-  "description": "KingVamp by Roni - privacy-first userscript manager. Run scripts on any site with a built-in safety scanner, network monitor and AI script writer. 100% local - no tracking, no data leaves your device.",
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  },
-  "action": {
-    "default_popup": "pages/popup.html",
-    "default_title": "KingVamp",
-    "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
-    }
-  },
+  "version": "2.0.0",
+  "description": "KingVamp by Roni — privacy-first userscript manager. Full GM API, AI writer, safety scanner, network monitor, and element picker. 100% local.",
   "background": {
-    "service_worker": "src/background.js",
-    "type": "module"
+    "service_worker": "src/background.js"
   },
   "content_scripts": [
     {
@@ -31,20 +16,48 @@
   ],
   "permissions": [
     "storage",
-    "unlimitedStorage",
     "scripting",
     "tabs",
     "webNavigation",
     "notifications",
     "alarms",
-    "downloads"
+    "downloads",
+    "clipboardWrite",
+    "contextMenus",
+    "cookies"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
-  "options_page": "pages/dashboard.html",
+  "action": {
+    "default_popup": "pages/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "KingVamp"
+  },
+  "options_ui": {
+    "page": "pages/dashboard.html",
+    "open_in_tab": true
+  },
   "commands": {
     "open-dashboard": {
-      "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" },
-      "description": "Open the KingVamp dashboard"
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Open KingVamp Dashboard"
     }
-  }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["pages/*", "assets/*", "lib/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
