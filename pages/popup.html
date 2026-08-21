@@ -1,69 +1,84 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <title>KingVamp</title>
   <link rel="stylesheet" href="../assets/theme.css">
   <style>
-    body { width: 330px; }
-    .kv-head .brand-name { font-size: 15px; }
-    .kv-head .brand-name .by { font-size: 11px; }
-    .kv-head .brand-tag { font-size: 10.5px; }
-    .script-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-    .script-row .info { flex: 1; min-width: 0; }
-    .script-row .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .script-row .sub { font-size: 11px; color: var(--muted); }
-    .empty { padding: 22px 16px; text-align: center; color: var(--muted); }
-    .actions { display: flex; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
-    .actions .btn { flex: 1; justify-content: center; min-width: 45%; }
-    .foot { padding: 8px 16px; font-size: 11px; color: var(--muted); text-align: center; border-top: 1px solid var(--border); }
-    .freeze { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
-    .sect { padding: 6px 16px 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
-    .cmd-row { display: block; width: calc(100% - 32px); margin: 4px 16px; text-align: left; }
-    .cmd-row .who { font-size: 11px; color: var(--muted); }
-    .site-row { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-    .site-row b { color: var(--text); font-weight: 600; }
-    #cmdSection.hidden, #list.hidden { display: none; }
+    body{width:360px;max-height:580px;overflow-y:auto}
+    .no-scripts{padding:18px 16px;text-align:center;color:var(--muted);font-size:12px}
+    .script-icon-letter{width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:9px;background:var(--red-gl);color:var(--red);font-weight:700;font-size:14px;border:1px solid rgba(225,6,44,0.2)}
+    .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 16px}
+    .actions .btn{justify-content:center}
+    .btn-full{grid-column:1/-1}
+    .site-bar{display:flex;align-items:center;gap:10px;padding:9px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+    .site-bar b{color:var(--text)}
+    .site-bar .label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .foot{padding:7px 16px;text-align:center;font-size:10px;color:var(--muted2);border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;justify-content:center}
+    .foot a{color:var(--muted2)}.foot a:hover{color:var(--red)}
+    .cmd-section{border-top:1px solid var(--border)}
+    .cmd-row{display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border)}
+    .cmd-row:last-child{border-bottom:none}
+    .cmd-who{font-size:10px;color:var(--muted2);flex-shrink:0;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .freeze-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;transition:background var(--t)}
+    .status-dot.paused{background:var(--border2)}
+    .run-badge{font-family:var(--mono);font-size:10px;color:var(--muted2)}
+    #errorBanner{display:none;padding:8px 16px;font-size:11px;background:var(--red-gl);color:var(--red);border-bottom:1px solid rgba(225,6,44,0.2)}
   </style>
 </head>
 <body>
   <div class="kv-head">
     <div class="logo">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <path d="M3 18 L3 7 L8 11 L12 4 L16 11 L21 7 L21 18 Z" fill="#e1062c"/>
-        <path d="M8 20 L9.5 20 L8.75 23 Z M14.5 20 L16 20 L15.25 23 Z" fill="#eceaf2"/>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path d="M3 18L3 7L8 11L12 4L16 11L21 7L21 18Z" fill="#e1062c"/>
+        <path d="M8 20L9.5 20L8.75 23ZM14.5 20L16 20L15.25 23Z" fill="#eceaf2"/>
       </svg>
       <div class="brand">
-        <div class="brand-name">King<span class="vamp">Vamp</span> <span class="by">by Roni</span></div>
+        <div class="brand-name">King<span class="vamp">Vamp</span><span class="by">by Roni</span></div>
         <div class="brand-tag">privacy-first userscript manager</div>
       </div>
     </div>
     <div class="kv-spacer"></div>
-    <label class="freeze" title="Master switch - pauses every script everywhere">
-      <span id="freezeLabel">Active</span>
-      <span class="switch"><input type="checkbox" id="globalToggle" checked><span class="track"></span></span>
-    </label>
+    <div class="freeze-row">
+      <div id="statusDot" class="status-dot"></div>
+      <span id="statusLabel">Active</span>
+      <label class="switch" title="Master switch">
+        <input type="checkbox" id="globalToggle" checked>
+        <span class="track"></span>
+      </label>
+    </div>
   </div>
-
-  <div id="list"></div>
-
-  <div id="cmdSection" class="hidden">
-    <div class="sect">Script commands on this page</div>
+  <div id="errorBanner"></div>
+  <div id="scriptList"></div>
+  <div id="cmdSection" class="cmd-section" style="display:none">
+    <div class="section-label">Menu Commands</div>
     <div id="cmdList"></div>
   </div>
-
-  <div class="site-row">
-    <span style="flex:1">Run KingVamp on <b id="siteHost">this site</b></span>
-    <span class="switch"><input type="checkbox" id="siteToggle" checked><span class="track"></span></span>
+  <div class="site-bar">
+    <span class="label">Run on <b id="siteHost">this page</b></span>
+    <label class="switch"><input type="checkbox" id="siteToggle" checked><span class="track"></span></label>
   </div>
-
   <div class="actions">
-    <button class="btn" id="hideEl">Hide an element</button>
-    <button class="btn" id="newForSite">+ Script for this site</button>
-    <button class="btn primary" id="openDash" style="min-width:100%">Dashboard</button>
+    <button class="btn" id="btnHide">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      Hide Element
+    </button>
+    <button class="btn" id="btnNew">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Script
+    </button>
+    <button class="btn primary btn-full" id="btnDash">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Open Dashboard
+    </button>
   </div>
-  <div class="foot">100% local &middot; no tracking &middot; Cmd+Shift+K opens dashboard</div>
-
-  <script src="../src/match.js"></script>
+  <div class="foot">
+    <span>100% local · no tracking</span><span>·</span>
+    <a id="footLogs" href="#">Logs</a><span>·</span>
+    <a id="footSettings" href="#">Settings</a><span>·</span>
+    <span>v2.0.0</span>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

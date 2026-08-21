@@ -1,122 +1,53 @@
-// KingVamp popup - scripts on this tab, script commands, element hider,
-// per-site block switch, master freeze switch.
-(async function () {
-  'use strict';
-  const $ = (s) => document.querySelector(s);
-
-  function send(msg) {
-    return chrome.runtime.sendMessage(Object.assign({ kv: true }, msg)).then((r) => {
-      if (r && r.error) throw new Error(r.error);
-      return r && r.value;
-    });
-  }
-
-  const store = await chrome.storage.local.get(['settings', 'blacklist']);
-  const settings = Object.assign({ globalEnabled: true }, store.settings || {});
-  const blacklist = store.blacklist || [];
-
-  const gt = $('#globalToggle');
-  gt.checked = settings.globalEnabled;
-  $('#freezeLabel').textContent = settings.globalEnabled ? 'Active' : 'Frozen';
-  gt.addEventListener('change', async () => {
-    settings.globalEnabled = gt.checked;
-    await chrome.storage.local.set({ settings });
-    $('#freezeLabel').textContent = gt.checked ? 'Active' : 'Frozen';
-    render();
-  });
-
-  let tab = null;
-  try { tab = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]; } catch (e) {}
-  let host = '';
-  try { host = new URL(tab.url).hostname; } catch (e) {}
-  if (host) $('#siteHost').textContent = host;
-
-  // per-site block switch
-  const siteToggle = $('#siteToggle');
-  const blocked = blacklist.includes(host);
-  siteToggle.checked = !blocked;
-  if (!host) siteToggle.disabled = true;
-  siteToggle.addEventListener('change', async () => {
-    await send({ api: 'setBlacklisted', args: [host, !siteToggle.checked] });
-    render();
-  });
-
-  async function render() {
-    const list = $('#list');
-    list.innerHTML = '';
-    const off = !settings.globalEnabled || blacklist.includes(host);
-    if (off) {
-      list.innerHTML = '<div class="empty">' +
-        (!settings.globalEnabled ? 'All scripts are frozen.<br>Flip the switch above to wake KingVamp.'
-          : 'KingVamp is blocked on ' + host + '.<br>Flip the site switch below to allow it here.') + '</div>';
-    } else if (!tab || !/^https?:/.test(tab.url || '')) {
-      list.innerHTML = '<div class="empty">No scripts can run on this page.</div>';
-    } else {
-      let matched = [];
-      try { matched = (await send({ api: 'getScriptsFor', args: [tab.url] })) || []; } catch (e) {}
-      if (!matched.length) {
-        list.innerHTML = '<div class="empty">No scripts match this site yet.</div>';
-      }
-      for (const sc of matched) {
-        const row = document.createElement('div');
-        row.className = 'script-row';
-        row.innerHTML = '<div class="info"><div class="name"></div><div class="sub">v' + (sc.version || '?') +
-          ' &middot; ran ' + (sc.runs || 0) + 'x</div></div>';
-        row.querySelector('.name').textContent = sc.name || 'Unnamed script';
-        const sw = document.createElement('span');
-        sw.className = 'switch';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!sc.enabled;
-        cb.addEventListener('change', async () => {
-          const all = (await chrome.storage.local.get('scripts')).scripts || {};
-          if (all[sc.id]) { all[sc.id].enabled = cb.checked; await chrome.storage.local.set({ scripts: all }); }
-        });
-        const tr = document.createElement('span');
-        tr.className = 'track';
-        sw.append(cb, tr);
-        row.appendChild(sw);
-        list.appendChild(row);
-      }
-    }
-
-    // script menu commands registered by scripts on this page
-    const cmdSection = $('#cmdSection');
-    const cmdList = $('#cmdList');
-    cmdList.innerHTML = '';
-    let cmds = [];
-    if (tab && tab.id != null) {
-      try { cmds = (await send({ api: 'getMenuCommands', args: [tab.id] })) || []; } catch (e) {}
-    }
-    cmdSection.classList.toggle('hidden', !cmds.length);
-    for (const c of cmds) {
-      const b = document.createElement('button');
-      b.className = 'btn cmd-row';
-      b.innerHTML = '<span class="who"></span>';
-      b.insertBefore(document.createTextNode(c.name), b.firstChild);
-      b.querySelector('.who').textContent = ' — ' + c.scriptName;
-      b.addEventListener('click', async () => {
-        try { await send({ api: 'runMenuCommand', args: [tab.id, c.cmdId] }); } catch (e) {}
-        window.close();
-      });
-      cmdList.appendChild(b);
-    }
-  }
-
-  $('#openDash').addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') });
-  });
-  $('#newForSite').addEventListener('click', () => {
-    let origin = '*://*/*';
-    try { const u = new URL(tab.url); origin = u.protocol + '//' + u.host + '/*'; } catch (e) {}
-    chrome.tabs.create({ url: chrome.runtime.getURL('pages/editor.html') + '#new=' + encodeURIComponent(origin) });
-  });
-  $('#hideEl').addEventListener('click', async () => {
-    if (tab && tab.id != null) {
-      try { await send({ api: 'startPicker', args: [tab.id] }); } catch (e) {}
-    }
-    window.close();
-  });
-
-  render();
-})();
+// KingVamp Popup v2.0.0
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const msg=(type,data={})=>chrome.runtime.sendMessage({type,...data});
+const editorUrl=id=>chrome.runtime.getURL('pages/editor.html')+(id?'?id='+id:'?new=1');
+const dashUrl=hash=>chrome.runtime.getURL('pages/dashboard.html')+(hash?'#'+hash:'');
+let tab,url,hostname,scripts=[],siteSettings={},settings={};
+async function init(){
+  [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+  url=tab?.url||'';
+  try{hostname=url?new URL(url).hostname:'';}catch{hostname='';}
+  $('siteHost').textContent=hostname||'this page';
+  const[cfg,tabData]=await Promise.all([msg('GET_SETTINGS'),url?msg('GET_TAB_SCRIPTS',{url}):null]);
+  settings=cfg||{};scripts=tabData?.scripts||[];siteSettings=tabData?.siteSettings||{};
+  const gt=$('globalToggle');
+  gt.checked=settings.globalEnabled!==false;
+  setStatus(gt.checked);
+  gt.addEventListener('change',async()=>{settings.globalEnabled=gt.checked;await msg('SAVE_SETTINGS',{settings});setStatus(gt.checked);});
+  const st=$('siteToggle');
+  st.checked=!siteSettings[hostname]?.disabled;
+  st.addEventListener('change',async()=>{siteSettings[hostname]={...siteSettings[hostname],disabled:!st.checked};await msg('SAVE_SITE_SETTINGS',{siteSettings});});
+  renderScripts();renderCommands();bindButtons();
+  const errors=scripts.filter(s=>s.errorCount>0);
+  if(errors.length){$('errorBanner').style.display='';$('errorBanner').textContent=`⚠ ${errors.length} script${errors.length>1?' have':' has'} recent errors — check the logs`;}
+}
+function setStatus(active){$('statusDot').classList.toggle('paused',!active);$('statusLabel').textContent=active?'Active':'Paused';}
+function renderScripts(){
+  const list=$('scriptList');
+  if(!scripts.length){list.innerHTML='<div class="no-scripts">No scripts match this page</div>';return;}
+  list.innerHTML=scripts.map(s=>{
+    const name=esc(s.meta?.name||s.id);
+    const ver=s.meta?.version?`v${esc(s.meta.version)}`:'',runs=s.runCount?`<span class="run-badge">${s.runCount}×</span>`:'',errs=s.errorCount?`<span class="badge badge-red">${s.errorCount} err</span>`:'';
+    const icon=s.meta?.icon?`<img src="${esc(s.meta.icon)}" alt="" onerror="this.style.display='none'">`:`<div class="script-icon-letter">${(s.meta?.name||'?')[0].toUpperCase()}</div>`;
+    return `<div class="script-row"><div class="script-icon">${icon}</div><div class="script-info"><div class="script-name" title="${name}">${name}</div><div class="script-meta">${ver?`<span>${ver}</span>`:''}${runs}${errs}</div></div><div class="script-actions"><button class="btn ghost icon" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><label class="switch"><input type="checkbox" class="stoggle" data-id="${s.id}" ${s.enabled?'checked':''}><span class="track"></span></label></div></div>`;
+  }).join('');
+  list.querySelectorAll('[data-edit]').forEach(el=>el.addEventListener('click',()=>{chrome.tabs.create({url:editorUrl(el.dataset.edit)});window.close();}));
+  list.querySelectorAll('.stoggle').forEach(el=>el.addEventListener('change',()=>msg('TOGGLE_SCRIPT',{id:el.dataset.id,enabled:el.checked})));
+}
+function renderCommands(){
+  const cmds=scripts.flatMap(s=>Object.values(s.menuCommands||{}).map(c=>({...c,sid:s.id,sname:s.meta?.name||s.id})));
+  if(!cmds.length){$('cmdSection').style.display='none';return;}
+  $('cmdSection').style.display='';
+  $('cmdList').innerHTML=cmds.map(c=>`<div class="cmd-row"><span class="cmd-who">${esc(c.sname)}</span><button class="btn ghost" style="flex:1;text-align:left;justify-content:flex-start" data-cmd="${esc(c.name)}" data-sid="${c.sid}">${esc(c.name)}${c.ak?`<kbd style="margin-left:auto">${esc(c.ak)}</kbd>`:''}</button></div>`).join('');
+  $('cmdList').querySelectorAll('[data-cmd]').forEach(el=>el.addEventListener('click',()=>msg('EXEC_CMD',{tabId:tab.id,name:el.dataset.cmd,scriptId:el.dataset.sid})));
+}
+function bindButtons(){
+  $('btnHide').addEventListener('click',async()=>{await msg('INJECT_PICKER',{tabId:tab.id});window.close();});
+  $('btnNew').addEventListener('click',()=>{chrome.tabs.create({url:editorUrl()+'&host='+encodeURIComponent(hostname)});window.close();});
+  $('btnDash').addEventListener('click',()=>{chrome.runtime.openOptionsPage();window.close();});
+  $('footLogs').addEventListener('click',e=>{e.preventDefault();chrome.tabs.create({url:dashUrl('logs')});window.close();});
+  $('footSettings').addEventListener('click',e=>{e.preventDefault();chrome.tabs.create({url:dashUrl('settings')});window.close();});
+}
+init().catch(console.error);
