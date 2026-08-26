@@ -258,6 +258,8 @@
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Master Switch</div><div class="setting-desc">Enable or disable all userscripts globally</div></div><label class="switch"><input type="checkbox" id="setGlobal"><span class="track"></span></label></div>
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Show Badge Count</div><div class="setting-desc">Show how many scripts run on the current tab</div></div><label class="switch"><input type="checkbox" id="setBadge"><span class="track"></span></label></div>
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Auto-Update Scripts</div><div class="setting-desc">Check @updateURL every 12 hours automatically</div></div><label class="switch"><input type="checkbox" id="setAutoUpdate"><span class="track"></span></label></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Log Level</div><div class="setting-desc">Minimum severity recorded to the console</div></div><select id="setLogLevel" style="width:110px;font-size:12px;padding:5px 7px"><option value="all">All</option><option value="log">Log+</option><option value="info">Info+</option><option value="warn">Warn+</option><option value="error">Errors only</option></select></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Default Run-At</div><div class="setting-desc">@run-at used for new scripts</div></div><select id="setDefaultRunAt" style="width:150px;font-size:12px;padding:5px 7px"><option value="document-idle">document-idle</option><option value="document-end">document-end</option><option value="document-body">document-body</option><option value="document-start">document-start</option></select></div>
             </div>
           </div>
           <div class="settings-section"><h2>Console &amp; Logging</h2>
@@ -308,6 +310,9 @@
       <div class="detail-actions">
         <button class="btn sm" id="detailEdit">Edit</button>
         <button class="btn sm" id="detailExport">Export</button>
+        <button class="btn sm" id="detailDuplicate">Duplicate</button>
+        <button class="btn sm" id="detailCheckUpdate">Update</button>
+        <button class="btn sm" id="detailResetStats">Reset Stats</button>
         <button class="btn sm danger" id="detailDelete">Delete</button>
       </div>
       <div class="scan-box">

@@ -52,6 +52,8 @@ async function init() {
             ${meta.author ? `<span class="badge badge-purple">by ${esc(meta.author)}</span>` : ''}
             ${isUpdate ? `<span class="badge badge-yellow">Update</span>` : `<span class="badge badge-green">New</span>`}
             ${dangers.length ? `<span class="badge badge-red">⚠ Security Risk</span>` : ''}
+            ${meta.noframes ? `<span class="badge badge-muted">@noframes</span>` : ''}
+            ${(meta.antifeature||[]).length ? `<span class="badge badge-red">⚠ Antifeature</span>` : ''}
           </div>
         </div>
       </div>
@@ -66,6 +68,7 @@ async function init() {
       ${scanResults?.length ? `<div class="scan-issues" style="display:block"><h3>⚠ Safety Scan — ${scanResults.length} finding${scanResults.length!==1?'s':''}</h3>${scanResults.map(r=>`<div class="scan-item"><span class="scan-sev ${r.sev}">${r.sev}</span><span class="scan-msg" style="font-size:12px">${esc(r.msg)}</span></div>`).join('')}</div>` : ''}
       ${grants.length ? `<div class="permissions"><h3>Requested Permissions (${grants.length})</h3>${grants.map(g=>{const info=GM_PERM_DESCRIPTIONS[g]||['🔧',g,'Custom permission'];return `<div class="perm-item"><div class="perm-icon">${info[0]}</div><div><div class="perm-name">${esc(info[1])}</div><div class="perm-desc">${esc(info[2])}</div></div></div>`;}).join('')}</div>` : ''}
       ${matches.length ? `<div class="permissions"><h3>Runs on (${matches.length} pattern${matches.length!==1?'s':''})</h3>${matches.map(m=>`<div style="font-family:var(--mono);font-size:12px;padding:5px 0;border-bottom:1px solid var(--border);color:var(--muted)">${esc(m)}</div>`).join('')}</div>` : ''}
+      ${(meta.antifeature||[]).length ? `<div style="padding:12px 24px;border-bottom:1px solid var(--border);font-size:12px;color:var(--yellow);display:flex;gap:8px;align-items:flex-start"><span>⚠</span><span>This script declares <code style="font-family:var(--mono)">@antifeature: ${esc(meta.antifeature.join(', '))}</code> — it may include ads, tracking or other unwanted behavior. Install only if you trust the source.</span></div>` : ''}
       <div class="install-code"><h3>Source Code <button class="btn ghost sm" id="btnToggleCode">Show</button></h3><div class="code-preview" id="codePreview" style="display:none"><textarea id="codeArea">${esc(code)}</textarea></div></div>
       <div class="install-actions">
         ${dangers.length ? `<div style="flex:1;font-size:12px;color:var(--red)">⚠ This script has security risk patterns. Install only if you trust the source.</div>` : '<div style="flex:1"></div>'}

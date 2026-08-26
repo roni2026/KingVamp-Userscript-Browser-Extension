@@ -23,6 +23,8 @@
     .freeze-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
     .status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;transition:background var(--t)}
     .status-dot.paused{background:var(--border2)}
+    .seg-btn.active{color:var(--text)!important;background:var(--bg3)}
+    .status-dot.paused{background:var(--border2)}
     .run-badge{font-family:var(--mono);font-size:10px;color:var(--muted2)}
     #errorBanner{display:none;padding:8px 16px;font-size:11px;background:var(--red-gl);color:var(--red);border-bottom:1px solid rgba(225,6,44,0.2)}
   </style>
@@ -50,6 +52,10 @@
     </div>
   </div>
   <div id="errorBanner"></div>
+  <div class="seg" style="display:flex;border-bottom:1px solid var(--border)">
+    <button class="seg-btn active" data-mode="tab" style="flex:1;border:none;background:none;color:var(--muted);font-size:11px;font-weight:700;padding:8px 10px;cursor:pointer">This Tab</button>
+    <button class="seg-btn" data-mode="all" style="flex:1;border:none;background:none;color:var(--muted);font-size:11px;font-weight:700;padding:8px 10px;cursor:pointer">All Scripts <span id="allCount" style="opacity:.7"></span></button>
+  </div>
   <div id="scriptList"></div>
   <div id="cmdSection" class="cmd-section" style="display:none">
     <div class="section-label">Menu Commands</div>

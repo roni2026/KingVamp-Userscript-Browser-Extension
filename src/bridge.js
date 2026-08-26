@@ -33,7 +33,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   // 2. Forward background events into the page
-  if (msg.__kvXR !== undefined || msg.__kvVC || msg.__kvCmd) {
+  if (msg.__kvXR !== undefined || msg.__kvVC || msg.__kvCmd || msg.__kvNotif || msg.__kvDL) {
     window.postMessage(msg, '*');
   }
 });

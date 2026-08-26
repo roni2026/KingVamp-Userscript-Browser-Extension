@@ -4,14 +4,17 @@ const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const msg=(type,data={})=>chrome.runtime.sendMessage({type,...data});
 const editorUrl=id=>chrome.runtime.getURL('pages/editor.html')+(id?'?id='+id:'?new=1');
 const dashUrl=hash=>chrome.runtime.getURL('pages/dashboard.html')+(hash?'#'+hash:'');
-let tab,url,hostname,scripts=[],siteSettings={},settings={};
+let tab,url,hostname,scripts=[],siteSettings={},settings={},tabDataScripts=[],allScriptsCache=null;
+let listMode='tab';
 async function init(){
   [tab]=await chrome.tabs.query({active:true,currentWindow:true});
   url=tab?.url||'';
   try{hostname=url?new URL(url).hostname:'';}catch{hostname='';}
   $('siteHost').textContent=hostname||'this page';
   const[cfg,tabData]=await Promise.all([msg('GET_SETTINGS'),url?msg('GET_TAB_SCRIPTS',{url}):null]);
-  settings=cfg||{};scripts=tabData?.scripts||[];siteSettings=tabData?.siteSettings||{};
+  settings=cfg||{};scripts=tabData?.scripts||[];tabDataScripts=scripts;siteSettings=tabData?.siteSettings||{};
+  fetchAllScripts().then(all=>{ if($('allCount')) $('allCount').textContent=all.length; });
+  document.querySelectorAll('.seg-btn').forEach(b=>b.addEventListener('click',()=>setListMode(b.dataset.mode)));
   const gt=$('globalToggle');
   gt.checked=settings.globalEnabled!==false;
   setStatus(gt.checked);
@@ -24,17 +27,25 @@ async function init(){
   if(errors.length){$('errorBanner').style.display='';$('errorBanner').textContent=`⚠ ${errors.length} script${errors.length>1?' have':' has'} recent errors — check the logs`;}
 }
 function setStatus(active){$('statusDot').classList.toggle('paused',!active);$('statusLabel').textContent=active?'Active':'Paused';}
+async function fetchAllScripts(){ if(allScriptsCache)return allScriptsCache; const all=await msg('GET_SCRIPTS'); allScriptsCache=Object.values(all); return allScriptsCache; }
 function renderScripts(){
   const list=$('scriptList');
-  if(!scripts.length){list.innerHTML='<div class="no-scripts">No scripts match this page</div>';return;}
+  if(!scripts.length){list.innerHTML='<div class="no-scripts">'+(listMode==='tab'?'No scripts match this page':'No scripts installed')+'</div>';return;}
   list.innerHTML=scripts.map(s=>{
     const name=esc(s.meta?.name||s.id);
     const ver=s.meta?.version?`v${esc(s.meta.version)}`:'',runs=s.runCount?`<span class="run-badge">${s.runCount}×</span>`:'',errs=s.errorCount?`<span class="badge badge-red">${s.errorCount} err</span>`:'';
+    const matchTag=listMode==='all'&&(s.meta?.match||[]).length?`<div style="font-family:var(--mono);font-size:9.5px;color:var(--muted2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.meta.match[0])}</div>`:'';
     const icon=s.meta?.icon?`<img src="${esc(s.meta.icon)}" alt="" onerror="this.style.display='none'">`:`<div class="script-icon-letter">${(s.meta?.name||'?')[0].toUpperCase()}</div>`;
-    return `<div class="script-row"><div class="script-icon">${icon}</div><div class="script-info"><div class="script-name" title="${name}">${name}</div><div class="script-meta">${ver?`<span>${ver}</span>`:''}${runs}${errs}</div></div><div class="script-actions"><button class="btn ghost icon" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><label class="switch"><input type="checkbox" class="stoggle" data-id="${s.id}" ${s.enabled?'checked':''}><span class="track"></span></label></div></div>`;
+    return `<div class="script-row"><div class="script-icon">${icon}</div><div class="script-info"><div class="script-name" title="${name}">${name}</div><div class="script-meta">${ver?`<span>${ver}</span>`:''}${runs}${errs}</div>${matchTag}</div><div class="script-actions"><button class="btn ghost icon" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><label class="switch"><input type="checkbox" class="stoggle" data-id="${s.id}" ${s.enabled?'checked':''}><span class="track"></span></label></div></div>`;
   }).join('');
   list.querySelectorAll('[data-edit]').forEach(el=>el.addEventListener('click',()=>{chrome.tabs.create({url:editorUrl(el.dataset.edit)});window.close();}));
-  list.querySelectorAll('.stoggle').forEach(el=>el.addEventListener('change',()=>msg('TOGGLE_SCRIPT',{id:el.dataset.id,enabled:el.checked})));
+  list.querySelectorAll('.stoggle').forEach(el=>el.addEventListener('change',async()=>{await msg('TOGGLE_SCRIPT',{id:el.dataset.id,enabled:el.checked});const t=allScriptsCache?.find(x=>x.id===el.dataset.id);if(t){t.enabled=el.checked;t.runCount=(t.runCount||0);}if(listMode==='tab'){const sc=scripts.find(x=>x.id===el.dataset.id);if(sc)sc.enabled=el.checked;}}));
+}
+function setListMode(m){
+  listMode=m;
+  document.querySelectorAll('.seg-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+  if(m==='all'){fetchAllScripts().then(all=>{scripts=all;renderScripts();renderCommands();});}
+  else {scripts=tabDataScripts;renderScripts();renderCommands();}
 }
 function renderCommands(){
   const cmds=scripts.flatMap(s=>Object.values(s.menuCommands||{}).map(c=>({...c,sid:s.id,sname:s.meta?.name||s.id})));

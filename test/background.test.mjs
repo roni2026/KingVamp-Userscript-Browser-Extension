@@ -26,8 +26,8 @@ const chromeStub = {
   storage,
   scripting: { executeScript: noop, insertCSS: noop },
   action: { setBadgeText: noop, setBadgeBackgroundColor: noop },
-  notifications: { create: noop },
-  downloads: { download: noop },
+  notifications: { create: noop, onClosed: { addListener: noop }, onClicked: { addListener: noop } },
+  downloads: { download: noop, onChanged: { addListener: noop } },
   cookies: { getAll: noop, set: noop, remove: noop },
   contextMenus: { removeAll: cb => cb && cb(), create: noop, onClicked: { addListener: noop } },
 };
@@ -55,6 +55,8 @@ console.log('parseMeta');
 // @grant        GM_setValue
 // @noframes
 // @connect      api.example.com
+// @antifeature  ads
+// @antifeature  tracking
 // @run-at       document-start
 // ==/UserScript==
 console.log('hi');`);
@@ -64,7 +66,9 @@ console.log('hi');`);
   assert('multi grant', meta.grant.length === 2);
   assert('connect', meta.connect && meta.connect[0] === 'api.example.com');
   assert('noframes flag', meta.noframes === true);
-  assert('run-at', meta['run-at'] === 'document-start');
+  assert('multi antifeature', Array.isArray(meta.antifeature) && meta.antifeature.length === 2 && meta.antifeature[0] === 'ads');
+  const unwrapMeta = parseMeta('// ==UserScript==\n// @name U\n// @unwrap\n// ==/UserScript==\nx();');
+  assert('unwrap flag', unwrapMeta.unwrap === true);
   const noBlock = parseMeta('const x = 1;');
   assert('no block fallback', noBlock.name === 'Unnamed Script');
 }
@@ -74,6 +78,12 @@ console.log('matchPattern');
   assert('exact host', matchPattern('https://example.com/*', 'https://example.com/a/b'));
   assert('wildcard subdomain', matchPattern('*://*.example.com/*', 'https://sub.example.com/x'));
   assert('apex matches *.pattern', matchPattern('*://*.example.com/*', 'https://example.com/x'));
+  assert('tld wildcard apex', matchPattern('*://*.example.*/*', 'https://example.com/x'));
+  assert('tld wildcard subdomain', matchPattern('*://*.example.*/*', 'https://sub.example.co.uk/x'));
+  assert('tld wildcard any tld', matchPattern('*://*.example.*/*', 'https://example.org/x'));
+  assert('tld wildcard deep sub', matchPattern('*://*.example.*/*', 'https://a.b.example.net/x'));
+  assert('tld wildcard rejection', !matchPattern('*://*.example.*/*', 'https://notexample.com/x'));
+  assert('tld wildcard no label', !matchPattern('*://*.example.*/*', 'https://example/x'));
   assert('wrong host rejected', !matchPattern('*://*.example.com/*', 'https://other.com/x'));
   assert('all_urls', matchPattern('<all_urls>', 'https://anything.io/path?q=1'));
   assert('scheme wildcard', matchPattern('*://example.com/*', 'http://example.com/'));
@@ -130,17 +140,24 @@ console.log('buildGmBoilerplate');
   assert('GM_info always present', full.includes('const GM_info='));
   assert('version stamped', full.includes('scriptHandlerVersion:\'3.0.0\''));
   const none = buildGmBoilerplate('kvt2', { name: 'S', grant: ['none'] }, {});
-  assert('grant none → nothing injected', none.includes('no GM API injected') && !none.includes('const GM_getValue='));
+  assert('grant none → GM_info only', !none.includes('const GM_getValue=') && none.includes('const GM_info=') && none.includes('only GM_info is injected'));
   const empty = buildGmBoilerplate('kvt3', { name: 'S' }, {});
-  assert('no grants → @grant none path', empty.includes('no GM API injected'));
+  assert('no grants → @grant none path (GM_info only)', empty.includes('only GM_info is injected') && !empty.includes('const GM_getValue='));
+  const g = buildGmBoilerplate('kvt4', { name: 'S', grant: ['GM_notification','GM_download'] }, {});
+  assert('notification nid plumbing', g.includes('const GM_notification=') && g.includes('_kvCall(\'notify\',{...o,nid})'));
+  assert('download did plumbing', g.includes('const GM_download=') && g.includes('_kvCall(\'dl\',{...o,did})'));
 }
 
 console.log('buildDefaultMeta');
 {
-  const d = buildDefaultMeta('example.com');
+  await storage.local.set({ settings: { defaultRunAt: 'document-start' } });
+  const d = await buildDefaultMeta('example.com');
   assert('default matches host', d.includes('@match        *://example.com/*'));
-  const g = buildDefaultMeta('');
-  assert('default matches all', g.includes('@match        *://*/*'));
+  assert('default run-at from settings', d.includes('@run-at       document-start'));
+  await storage.local.set({ settings: {} });
+  const g2 = await buildDefaultMeta('');
+  assert('default matches all', g2.includes('@match        *://*/*'));
+  assert('default run-at fallback', g2.includes('@run-at       document-idle'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

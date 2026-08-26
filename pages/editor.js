@@ -101,6 +101,7 @@ function initEditor() {
       'Cmd-Shift-D': () => deleteLine(), 'Ctrl-Shift-D': () => deleteLine(),
       'Cmd-L': 'selectLine', 'Ctrl-L': 'selectLine',
       'Ctrl-Shift-F': () => formatCode(), 'Cmd-Shift-F': () => formatCode(),
+      'Ctrl-Enter': () => saveAndClose(), 'Cmd-Enter': () => saveAndClose(),
       'F11': cm2 => { cm2.setOption('fullScreen', !cm2.getOption('fullScreen')); },
     },
   });
@@ -116,7 +117,16 @@ function initEditor() {
   updateStatusBar();
 }
 function gmHint(cm2) {
-  const cur = cm2.getCursor(), token = cm2.getTokenAt(cur), word = token.string;
+  const cur = cm2.getCursor();
+  const line = cm2.getLine(cur.line) || '';
+  const token = cm2.getTokenAt(cur);
+  // Inside the ==UserScript== metadata block: suggest @keys
+  if (/^\s*\/\//.test(line) && (token.string.startsWith('@') || /^\s*\/\/\s*@?$/.test(line))) {
+    const word = token.string.startsWith('@') ? token.string.slice(1) : '';
+    const list = META_KEYS.filter(k => k.startsWith(word)).map(k => '@' + k);
+    if (list.length) return { list, from: CodeMirror.Pos(cur.line, token.start), to: CodeMirror.Pos(cur.line, token.end) };
+  }
+  const word = token.string;
   const list = GM_COMPLETIONS.filter(c => c.toLowerCase().startsWith(word.toLowerCase())).slice(0, 40);
   return { list, from: CodeMirror.Pos(cur.line, token.start), to: CodeMirror.Pos(cur.line, token.end) };
 }
@@ -266,6 +276,47 @@ function deleteLine() {
   cm.replaceRange('', { line: cur.line, ch: 0 }, { line: cur.line + 1, ch: 0 });
 }
 
+// ── Overflow-menu actions ─────────────────────────────────────────
+function exportCode() {
+  const code = cm.getValue();
+  const name = ($('mName').value || 'script').replace(/[^\w.-]+/g, '_');
+  const blob = new Blob([code], { type: 'text/javascript' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '.user.js';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  $('overflowPop').classList.remove('open');
+}
+function copyCode() {
+  const code = cm.getValue();
+  navigator.clipboard.writeText(code).then(() => { $('statusSaved').textContent = 'Copied'; }).catch(() => {});
+  $('overflowPop').classList.remove('open');
+}
+function stripTrailingWhitespace() {
+  let removed = 0;
+  const cur = cm.getCursor();
+  cm.eachLine(l => { const txt = l.text; if (/[ \t]+$/.test(txt)) { cm.replaceRange('', { line: l.lineNo, ch: txt.replace(/[ \t]+$/, '').length }, { line: l.lineNo, ch: txt.length }); removed++; } });
+  cm.setCursor(cur);
+  if (removed) { setDirty(true); $('statusSaved').textContent = `Trimmed ${removed} line${removed !== 1 ? 's' : ''}`; } else $('statusSaved').textContent = 'No trailing whitespace';
+  $('overflowPop').classList.remove('open');
+}
+function sortLines() {
+  const sel = cm.getSelection();
+  const from = cm.getCursor('from'), to = cm.getCursor('to');
+  const start = from.line, end = sel ? to.line : from.line;
+  const lines = [];
+  for (let i = start; i <= end; i++) lines.push(cm.getLine(i));
+  lines.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  cm.replaceRange(lines.join('\n'), { line: start, ch: 0 }, { line: end, ch: cm.getLine(end).length });
+  setDirty(true);
+  $('overflowPop').classList.remove('open');
+}
+async function saveAndClose() {
+  await save();
+  if (!isDirty) { chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') }); window.close(); }
+}
+
 // ── Status bar ────────────────────────────────────────────────────
 function setDirty(d) { isDirty = d; $('statusDirty').classList.toggle('visible', d); }
 function updateStatusBar() {
@@ -307,7 +358,13 @@ function bindToolbar() {
   });
   $('btnScanNow').addEventListener('click', runScan);
   $('btnFullscreen').addEventListener('click', () => cm.setOption('fullScreen', !cm.getOption('fullScreen')));
-  $('btnSettings').addEventListener('click', e => { e.stopPropagation(); $('settingsPop').classList.toggle('open'); });
+  $('btnSettings').addEventListener('click', e => { e.stopPropagation(); $('settingsPop').classList.toggle('open'); $('overflowPop').classList.remove('open'); });
+  $('btnOverflow').addEventListener('click', e => { e.stopPropagation(); $('overflowPop').classList.toggle('open'); $('settingsPop').classList.remove('open'); });
+  $('opExport').addEventListener('click', exportCode);
+  $('opCopy').addEventListener('click', copyCode);
+  $('opTrailing').addEventListener('click', stripTrailingWhitespace);
+  $('opSortLines').addEventListener('click', sortLines);
+  $('opSaveClose').addEventListener('click', saveAndClose);
   $('btnSidebar').addEventListener('click', () => { $('sidebar').classList.toggle('collapsed'); setTimeout(() => cm.refresh(), 180); });
   $('btnDash').addEventListener('click', () => {
     if (isDirty && !confirm('Unsaved changes. Leave?')) return;
@@ -325,7 +382,7 @@ function bindToolbar() {
     renderErrorPanel();
     openErrorPanel();
   }));
-  document.addEventListener('click', e => { if (!$('settingsPop').contains(e.target) && e.target.id !== 'btnSettings') $('settingsPop').classList.remove('open'); });
+  document.addEventListener('click', e => { if (!$('settingsPop').contains(e.target) && e.target.id !== 'btnSettings') $('settingsPop').classList.remove('open'); if (!$('overflowPop').contains(e.target) && e.target.id !== 'btnOverflow') $('overflowPop').classList.remove('open'); });
 }
 function bindSettingsPop() {
   $('setTheme').value = settings.editorTheme; $('setKeymap').value = settings.editorKeymap;

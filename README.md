@@ -10,12 +10,11 @@ A privacy-first, **cross-browser userscript manager** — a Tampermonkey alterna
 
 **Engine (Tampermonkey-parity)**
 
-- Runs userscripts on `<all_urls>` with `@match` / `@include` / `@exclude` / `@exclude-match` / `@noframes` support, injected at `document-start` / `document-body` / `document-end` / `document-idle`
-- Full `GM_*` API: `GM_getValue` / `GM_setValue` / `GM_deleteValue` / `GM_listValues` / `GM_addValueChangeListener` / `GM_getTab` / `GM_saveTab` / `GM_getTabs` / `GM_addStyle` / `GM_log` / `GM_xmlhttpRequest` / `GM_notification` / `GM_openInTab` / `GM_setClipboard` / `GM_download` / `GM_getResourceText` / `GM_getResourceURL` / `GM_registerMenuCommand` / `GM_unregisterMenuCommand` / `GM_cookie` / `GM_info` / `unsafeWindow` — **grant-gated**, so only the APIs you declare in `@grant` are injected
-- `@require` libraries, `@resource` files, `@updateURL` / `@downloadURL` auto-updates (scheduled, or manual via Tools → Script Updater)
+- Runs userscripts on `<all_urls>` with `@match` / `@include` / `@exclude` / `@exclude-match` / `@noframes` support (**TLD wildcards like `*://*.example.*/` included**), injected at `document-start` / `document-body` / `document-end` / `document-idle` / **`context-menu`** (right-click → ▶ Run userscript)
+- Full `GM_*` API: `GM_getValue` / `GM_setValue` / `GM_deleteValue` / `GM_listValues` / `GM_addValueChangeListener` / `GM_getTab` / `GM_saveTab` / `GM_getTabs` / `GM_addStyle` / `GM_log` / `GM_xmlhttpRequest` (incl. `timeout`, `responseType: json|arraybuffer|blob`) / `GM_notification` (callbacks: `onclick`/`ondone`/`timeout`/`tag`) / `GM_openInTab` / `GM_setClipboard` / `GM_download` (callbacks: `onload`/`onerror`/`onabort`) / `GM_getResourceText` / `GM_getResourceURL` / `GM_registerMenuCommand` / `GM_unregisterMenuCommand` / `GM_cookie` / `GM_info` / `unsafeWindow` — **grant-gated**, only declared APIs are injected, and with `@grant none` `GM_info` stays available (Tampermonkey behaviour)
+- `@require` libraries, `@resource` files, `@updateURL` / `@downloadURL` auto-updates (scheduled **or per-script** via the dashboard detail panel), `@unwrap` support
 - `@connect` enforcement: `GM_xmlhttpRequest` only reaches origins you declare, exactly like Tampermonkey
-- Safety scanner that flags dangerous patterns (miners, `eval`, credential scraping, obfuscation) before you install
-- Script storage browser (GM values per script), backup/restore (JSON/ZIP), import from files or drag-and-drop
+- Trust helpers: safety scanner, **`@antifeature` disclosure on the install page**, script storage browser, backup/restore, per-script **Duplicate** / **Reset Stats** / **Check Update** actions
 - Install interception: click any `*.user.js` link → KingVamp installs it; visit a raw `.user.js` page → install banner appears; right-click any link → "Install userscript with KingVamp"
 
 **Advanced code editor (Tampermonkey-class)**
@@ -27,7 +26,13 @@ A privacy-first, **cross-browser userscript manager** — a Tampermonkey alterna
 - Find / replace (regex-capable, persistent panel), **go to line (Ctrl+G)**, toggle comments, duplicate/delete line, jump to next/previous error (F8 / Shift+F8)
 - Theme picker (Dracula, Monokai, Material, Solarized), **keymap presets: Default / Sublime Text / Vim / Emacs**
 - One-click format (js-beautify), fullscreen mode (F11), font size & tab size controls, word wrap
-- Auto-save option, editable metadata sidebar (match, exclude, grant, require, resource, connect, run-at, URLs, license, `@noframes`)
+- `⋯` menu: **Export as .user.js, copy code, remove trailing whitespace, sort lines, Save & close (Ctrl+Enter)**
+- **`@key` autocomplete inside the metadata block**, auto-save option, editable metadata sidebar (match, exclude, grant, require, resource, connect, run-at, URLs, license, `@noframes`)
+
+**Popup & settings**
+
+- **This Tab / All Scripts** toggle with counts, per-tab script list, menu commands with access-key hints, install-from-URL field
+- Dashboard: log-level filter, **default `@run-at` for new scripts**, editor settings, per-script update check
 
 **Dashboard**
 
@@ -76,6 +81,7 @@ Then open the generated Xcode project, run it, and enable the extension in Safar
 | `Ctrl+Shift+F` | Format code |
 | `F8` / `Shift+F8` | Next / previous error |
 | `Ctrl+Shift+[` / `]` | Fold / unfold all |
+| `Ctrl+Enter` | Save & close (back to dashboard) |
 | `Ctrl+D` / `Ctrl+Shift+D` | Duplicate / delete line |
 | `Ctrl+L` | Select line |
 | `Ctrl+]` / `Ctrl+[` | Indent / outdent |

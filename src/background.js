@@ -23,7 +23,7 @@ function safeSend(message) {
 function parseMeta(code) {
   const block = code.match(/\/\/\s*==UserScript==\s*\n([\s\S]*?)\n\s*\/\/\s*==\/UserScript==/);
   if (!block) return { name: 'Unnamed Script' };
-  const multi = ['match','include','exclude','exclude-match','require','resource','grant','connect'];
+  const multi = ['match','include','exclude','exclude-match','require','resource','grant','connect','antifeature'];
   const meta = {};
   for (const line of block[1].split('\n')) {
     const m = line.match(/^\s*\/\/\s*@([A-Za-z-]+)(?:\s+(.*?))?\s*$/);
@@ -32,13 +32,16 @@ function parseMeta(code) {
     const lk = key.toLowerCase();
     if (multi.includes(lk)) { meta[lk] = meta[lk] || []; meta[lk].push((val||'').trim()); }
     else if (lk === 'noframes') meta.noframes = true;
+    else if (lk === 'unwrap') meta.unwrap = true;
     else meta[lk] = (val||'').trim();
   }
   if (!meta.name) meta.name = 'Unnamed Script';
   return meta;
 }
 
-function buildDefaultMeta(host) {
+async function buildDefaultMeta(host) {
+  const settings = await getSettings();
+  const runAt = ['document-start','document-body','document-end','document-idle'].includes(settings.defaultRunAt) ? settings.defaultRunAt : 'document-idle';
   return `// ==UserScript==
 // @name         New Script for ${host || 'All Sites'}
 // @namespace    https://kingvamp.local/
@@ -49,7 +52,7 @@ function buildDefaultMeta(host) {
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_log
-// @run-at       document-idle
+// @run-at       ${runAt}
 // ==/UserScript==
 
 (function () {
@@ -78,6 +81,13 @@ function matchPattern(pat, url) {
       if (host !== '*') {
         if (host.startsWith('*.')) {
           const sfx = host.slice(2);
+          // TLD wildcards like *://*.example.*/ (matches example.com, example.org, sub.example.co.uk…)
+          if (sfx.endsWith('.*')) {
+            const tld = sfx.slice(0, -2);
+            const parts = u.hostname.split('.');
+            const idx = parts.findIndex(p => p === tld);
+            return idx !== -1 && idx <= parts.length - 2;
+          }
           if (u.hostname !== sfx && !u.hostname.endsWith('.' + sfx)) return false;
         } else if (host !== u.hostname) return false;
       }
@@ -109,15 +119,20 @@ async function getScripts() { return (await get('scripts')) || {}; }
 async function saveScripts(s) { return set('scripts', s); }
 async function getSettings() {
   const s = (await get('settings')) || {};
-  return { globalEnabled:true, autoUpdate:true, showBadge:true, logLimit:500, updateInterval:12, aiModel:'', aiKey:'', editorTheme:'dracula', editorKeymap:'default', editorTabSize:2, editorFontSize:13, editorWrap:false, editorLint:true, editorAutoSave:false, ...s };
+  return { globalEnabled:true, autoUpdate:true, showBadge:true, logLimit:500, updateInterval:12, aiModel:'', aiKey:'', editorTheme:'dracula', editorKeymap:'default', editorTabSize:2, editorFontSize:13, editorWrap:false, editorLint:true, editorAutoSave:false, logLevel:'all', defaultRunAt:'document-idle', ...s };
 }
 async function getSiteSettings() { return (await get('siteSettings')) || {}; }
 
 // ── Logging ───────────────────────────────────────────────────────
+const LOG_PRIO = { error: 0, warn: 1, info: 2, log: 3 };
+
 async function addLog(entry) {
+  const settings = await getSettings();
+  const level = settings.logLevel || 'all';
+  const entryPrio = LOG_PRIO[entry.level] ?? 3;
+  if (level !== 'all' && entryPrio > (LOG_PRIO[level] ?? 0)) return;
   let logs = (await get('kv_logs')) || [];
   logs.unshift({ ...entry, id: genId(), ts: Date.now() });
-  const settings = await getSettings();
   if (logs.length > (settings.logLimit || 500)) logs.length = settings.logLimit;
   await set('kv_logs', logs);
   safeSend({ _kv: 'LOG_NEW', entry: logs[0] });
@@ -195,8 +210,17 @@ async function loadResources(meta) {
 // ── GM API Code Builder (grant-gated, Tampermonkey-style) ─────────
 function buildGmBoilerplate(scriptId, meta, resources) {
   const grants = (meta.grant || []).map(g => g.trim()).filter(Boolean);
+  const infoBlock = `const unsafeWindow=window;
+const GM_info={
+  script:{id:_kvId,name:${JSON.stringify(meta.name||'')},namespace:${JSON.stringify(meta.namespace||'')},version:${JSON.stringify(meta.version||'')},description:${JSON.stringify(meta.description||'')},matches:${JSON.stringify(meta.match||[])},grants:${JSON.stringify(grants)},updateURL:${JSON.stringify(meta.updateURL||'')},downloadURL:${JSON.stringify(meta.downloadURL||'')},supportURL:${JSON.stringify(meta.supportURL||'')},homepageURL:${JSON.stringify(meta.homepageURL||meta.homepage||'')},license:${JSON.stringify(meta.license||'')},noframes:${JSON.stringify(!!meta.noframes)}},
+  scriptHandler:'KingVamp',scriptHandlerVersion:'3.0.0',version:'3.0.0',
+  isIncognito:false,downloadMode:'native',
+};`;
   const noGrant = grants.includes('none') || grants.length === 0;
-  if (noGrant) return '// @grant none — no GM API injected\n';
+  // Tampermonkey behaviour: with @grant none, GM_info stays available
+  if (noGrant) return `// @grant none — only GM_info is injected
+const _kvId=${JSON.stringify(scriptId)};
+${infoBlock}`;
   const has = name => grants.includes(name);
 
   const body = [];
@@ -214,12 +238,7 @@ const _kvCall=(type,data)=>new Promise((res,rej)=>{
   window.postMessage({__kv:1,rid,scriptId:_kvId,type,data},'*');
   setTimeout(()=>{window.removeEventListener('message',fn)},15000);
 });
-const unsafeWindow=window;
-const GM_info={
-  script:{id:_kvId,name:${JSON.stringify(meta.name||'')},namespace:${JSON.stringify(meta.namespace||'')},version:${JSON.stringify(meta.version||'')},description:${JSON.stringify(meta.description||'')},matches:${JSON.stringify(meta.match||[])},grants:${JSON.stringify(grants)},updateURL:${JSON.stringify(meta.updateURL||'')},downloadURL:${JSON.stringify(meta.downloadURL||'')},supportURL:${JSON.stringify(meta.supportURL||'')},homepageURL:${JSON.stringify(meta.homepageURL||meta.homepage||'')},license:${JSON.stringify(meta.license||'')},noframes:${JSON.stringify(!!meta.noframes)}},
-  scriptHandler:'KingVamp',scriptHandlerVersion:'3.0.0',version:'3.0.0',
-  isIncognito:false,downloadMode:'native',
-};`
+${infoBlock}`
   );
 
   const apis = {
@@ -238,10 +257,41 @@ const GM_info={
     GM_removeValueChangeListener: "const GM_removeValueChangeListener=lid=>_kvCall('rvcl',{lid});",
     GM_addStyle: "const GM_addStyle=css=>{const el=document.createElement('style');el.textContent=css;(document.head||document.documentElement).appendChild(el);return el};",
     GM_log: `const GM_log=(...a)=>{const msg=a.map(x=>typeof x==='object'?JSON.stringify(x):String(x)).join(' ');console.log('[GM]',msg);_kvCall('log',{level:'log',msg})};`,
-    GM_notification: "const GM_notification=(d,done)=>{const o=typeof d==='string'?{text:d}:d;_kvCall('notify',o);if(done)setTimeout(done,100)};",
+    GM_notification: `const GM_notification=(d,done,click,timeout)=>{
+  let o; let onDone=done;
+  if(typeof d==='string'){
+    o={text:d};
+    if(typeof done==='string')o.title=done;
+    o.timeout=(typeof click==='number'?click:(typeof timeout==='number'?timeout:0))||0;
+    if(typeof done==='function')onDone=done;
+    if(typeof click==='function')o.onclick=click;
+    if(typeof timeout==='function')onDone=timeout;
+  } else { o=d; if(o.ondone)onDone=o.ondone; }
+  const nid=Math.random().toString(36).slice(2);
+  _kvCall('notify',{...o,nid});
+  const fin=(...a)=>{try{onDone?.(...a)}catch{}};
+  setTimeout(fin,o.timeout||8000);
+  window.addEventListener('message',function h(e){
+    if(e.data?.__kvNotif?.nid!==nid)return;
+    window.removeEventListener('message',h);
+    const ev=e.data.__kvNotif;
+    if(ev.type==='click'){try{o.onclick?.(ev.obj)}catch{}}
+    else {try{o.ondone?.(ev.obj)}catch{}}
+  });};`,
     GM_openInTab: "const GM_openInTab=(url,o)=>_kvCall('openTab',{url,opts:o||{}});",
     GM_setClipboard: "const GM_setClipboard=(data,type)=>_kvCall('clip',{data,type:type||'text'});",
-    GM_download: "const GM_download=(d)=>_kvCall('dl',typeof d==='string'?{url:d}:d);",
+    GM_download: `const GM_download=(d)=>{
+  const o=typeof d==='string'?{url:d}:d;
+  const did=Math.random().toString(36).slice(2);
+  _kvCall('dl',{...o,did});
+  window.addEventListener('message',function h(e){
+    if(e.data?.__kvDL?.did!==did)return;
+    window.removeEventListener('message',h);
+    const ev=e.data.__kvDL;
+    if(ev.ok){try{o.onload?.(ev)}catch{}}
+    else if(ev.aborted){try{o.onabort?.()}catch{}}
+    else {try{o.onerror?.(ev)}catch{}}
+  });};`,
     GM_getResourceText: `const GM_getResourceText=name=>{const r=_kvRes[name];if(!r)return null;try{return atob(r.dataUrl.split(',')[1])}catch{return null}};`,
     GM_getResourceURL: "const GM_getResourceURL=name=>_kvRes[name]?.dataUrl||null;",
     GM_registerMenuCommand: `const GM_registerMenuCommand=(name,fn,ak)=>{
@@ -309,7 +359,13 @@ async function buildAndInject(tabId, frameId, script, injectImmediately) {
   const requireCodes = await Promise.all((meta.require || []).map(loadRequire));
   const gm = buildGmBoilerplate(script.id, meta, script.resources || {});
 
-  const wrapped = `(function(){\n"use strict";\n${gm}\n/* @require */\n${requireCodes.join('\n')}\n/* ${meta.name||script.id} */\n${script.code}\n})();`;
+  const wrapped = meta.unwrap
+    ? `${gm}
+/* @require */
+${requireCodes.join('\n')}
+/* ${meta.name||script.id} */
+${script.code}`
+    : `(function(){\n"use strict";\n${gm}\n/* @require */\n${requireCodes.join('\n')}\n/* ${meta.name||script.id} */\n${script.code}\n})();`;
 
   try {
     if (await detectFirefox()) {
@@ -363,8 +419,10 @@ async function injectForTab(tabId, url, frameId, phase) {
   const matching = Object.values(scripts).filter(s => scriptMatchesUrl(s, url));
   for (const script of matching) {
     if (script.meta?.noframes && frameId !== 0) continue;
-    const runAt = RUN_AT[script.meta?.['run-at']] || 'idle';
-    if (runAt !== phase) continue;
+    const runAt = script.meta?.['run-at'];
+    if (runAt === 'context-menu') continue; // only started from the context menu
+    const phase2 = RUN_AT[runAt] || 'idle';
+    if (phase2 !== phase) continue;
     buildAndInject(tabId, frameId, script, phase === 'start').catch(console.error);
   }
   if (phase === 'end') updateBadge(tabId, matching.length);
@@ -382,6 +440,8 @@ async function updateBadge(tabId, count) {
 
 // ── GM API Message Handler ────────────────────────────────────────
 const activeXhrs = new Map();
+const notifCallbacks = new Map();   // notificationId -> { tabId, nid }
+const dlCallbacks = new Map();      // downloadId -> { tabId, did }
 
 function isConnectAllowed(meta, pageHost, targetUrl) {
   const connects = (meta?.connect || []).map(c => c.trim()).filter(Boolean);
@@ -411,10 +471,26 @@ async function handleApi(msg, sender) {
   if (type === 'saveTab') { const store=(await get('kv_tabs'))||{}; store[scriptId]=store[scriptId]||{}; if (sender.tab) store[scriptId][sender.tab.id]=data.t||{}; await set('kv_tabs',store); return true; }
   if (type === 'getTabs') { const store=(await get('kv_tabs'))||{}; return store[scriptId]||{}; }
   if (type === 'log') { const scripts=await getScripts(); const name=scripts[scriptId]?.meta?.name||scriptId; await addLog({scriptId,scriptName:name,level:data.level||'log',msg:data.msg,url:sender.url||''}); return true; }
-  if (type === 'notify') { chrome.notifications.create({type:'basic',iconUrl:'../icons/icon48.png',title:data.title||'KingVamp Script',message:data.text||data.message||'',silent:!!data.silent}); return true; }
+  if (type === 'notify') {
+    const nid = data.nid || genId();
+    const options = { type:'basic', iconUrl:'../icons/icon48.png', title:data.title||'KingVamp Script', message:data.text||data.message||'', silent:!!data.silent, priority:Number(data.priority)||0 };
+    if (data.tag) options.tag = String(data.tag);
+    chrome.notifications.create(nid, options);
+    notifCallbacks.set(nid, { tabId: sender.tab?.id, nid });
+    return true;
+  }
   if (type === 'openTab') { chrome.tabs.create({url:data.url,active:data.opts?.active!==false}); return true; }
   if (type === 'clip') { await set('kv_clipboard',data.data); return true; }
-  if (type === 'dl') { chrome.downloads.download({url:data.url,filename:data.name,saveAs:!!data.saveAs}); return true; }
+  if (type === 'dl') {
+    // Note: saveAs/filename supported everywhere; incognito/conflictAction ignored on Firefox.
+    try {
+      const download = await chrome.downloads.download({ url:data.url, filename:data.name || undefined, saveAs:!!data.saveAs });
+      dlCallbacks.set(download, { tabId: sender.tab?.id, did: data.did });
+    } catch (e) {
+      if (sender.tab?.id !== undefined) chrome.tabs.sendMessage(sender.tab.id, { __kvDL: { did: data.did, ok:false, err:e.message } }).catch(()=>{});
+    }
+    return true;
+  }
   if (type === 'regCmd') {
     const scripts = await getScripts();
     if (scripts[scriptId]) { scripts[scriptId].menuCommands=scripts[scriptId].menuCommands||{}; scripts[scriptId].menuCommands[data.name]={name:data.name,ak:data.ak}; await saveScripts(scripts); }
@@ -431,17 +507,31 @@ async function handleApi(msg, sender) {
     activeXhrs.set(data.xid, ctrl);
     const t0 = Date.now();
     const tabId = sender.tab?.id;
+    let timedOut = false;
+    const timer = data.timeout ? setTimeout(() => { timedOut = true; ctrl.abort(); }, data.timeout) : null;
     try {
       const res = await fetch(data.url, { method:data.method||'GET', headers:data.headers, body:data.body||undefined, signal:ctrl.signal });
       const dur = Date.now()-t0;
-      let resp = data.responseType==='json' ? await res.json() : await res.text();
+      let resp;
+      if (data.responseType === 'json') resp = await res.json();
+      else if (data.responseType === 'arraybuffer') {
+        const buf = await res.arrayBuffer();
+        let bin = ''; const bytes = new Uint8Array(buf); const CH = 0x8000;
+        for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+        resp = { base64: btoa(bin), byteLength: bytes.length };
+      } else if (data.responseType === 'blob') {
+        const blob = await res.blob();
+        resp = await new Promise(resolve => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.readAsDataURL(blob); });
+        resp = { dataUrl: resp };
+      } else resp = await res.text();
       const response = { status:res.status, statusText:res.statusText, responseText:typeof resp==='string'?resp:'', response:resp, finalUrl:res.url, readyState:4, responseHeaders:[...res.headers.entries()].map(([k,v])=>`${k}: ${v}`).join('\r\n') };
       addNetLog({scriptId,method:data.method,url:data.url,status:res.status,dur,size:typeof resp==='string'?resp.length:0});
       if (tabId) chrome.tabs.sendMessage(tabId, {__kvXR:data.xid,event:'load',response}).catch(()=>{});
     } catch(e) {
-      if (tabId) chrome.tabs.sendMessage(tabId, {__kvXR:data.xid,event:e.name==='AbortError'?'abort':'error',response:{error:e.message}}).catch(()=>{});
+      const event = timedOut ? 'timeout' : (e.name==='AbortError' ? 'abort' : 'error');
+      if (tabId) chrome.tabs.sendMessage(tabId, {__kvXR:data.xid,event,response:{error:e.message}}).catch(()=>{});
       addNetLog({scriptId,method:data.method,url:data.url,status:0,dur:Date.now()-t0,size:0});
-    } finally { activeXhrs.delete(data.xid); }
+    } finally { if (timer) clearTimeout(timer); activeXhrs.delete(data.xid); }
     return true;
   }
   if (type === 'xhrAbort') { activeXhrs.get(data.xid)?.abort(); return true; }
@@ -562,15 +652,57 @@ chrome.commands.onCommand.addListener(cmd => { if (cmd === 'open-dashboard') chr
 chrome.alarms.create('kv_autoupdate', { periodInMinutes: 720 });
 chrome.alarms.onAlarm.addListener(a => { if (a.name === 'kv_autoupdate') checkUpdates(); });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: 'kv-install-link', title: 'Install userscript with KingVamp', contexts: ['link'], documentUrlPatterns: ['http://*/*', 'https://*/*'] });
-    chrome.contextMenus.create({ id: 'kv-install-page', title: 'Install this userscript with KingVamp', contexts: ['page'], documentUrlPatterns: ['http://*/*', 'https://*/*'] });
-  });
-});
+// ── Context menus: install entries + @run-at context-menu scripts ──
+function toMenuPattern(pattern) {
+  if (pattern === '<all_urls>') return '<all_urls>';
+  const p = String(pattern || '');
+  if (p.startsWith('/')) return undefined;              // regex patterns can't map to MV3 menus
+  if (!p.includes('://')) return undefined;
+  return p;
+}
+async function rebuildScriptMenus() {
+  try { await chrome.contextMenus.removeAll(); } catch {}
+  chrome.contextMenus.create({ id: 'kv-install-link', title: 'Install userscript with KingVamp', contexts: ['link'], documentUrlPatterns: ['http://*/*', 'https://*/*'] });
+  chrome.contextMenus.create({ id: 'kv-install-page', title: 'Install this userscript with KingVamp', contexts: ['page'], documentUrlPatterns: ['http://*/*', 'https://*/*'] });
+  const scripts = await getScripts();
+  const ctxScripts = Object.values(scripts).filter(s => s.enabled && s.meta?.['run-at'] === 'context-menu').slice(0, 12);
+  if (!ctxScripts.length) return;
+  chrome.contextMenus.create({ id: 'kv-run-menu', title: '▶ Run userscript', contexts: ['page', 'frame', 'link', 'selection'] });
+  for (const s of ctxScripts) {
+    const patterns = (s.meta?.match || []).map(toMenuPattern).filter(Boolean).slice(0, 30);
+    chrome.contextMenus.create({ id: 'kv-run-' + s.id, parentId: 'kv-run-menu', title: s.meta?.name || s.id, contexts: ['page', 'frame', 'link', 'selection'], documentUrlPatterns: patterns.length ? patterns : undefined });
+  }
+}
+async function runContextMenuScript(tabId, scriptId) {
+  const scripts = await getScripts();
+  const s = scripts[scriptId];
+  if (!s || !s.enabled) return;
+  await buildAndInject(tabId, 0, s, true);
+}
+
+chrome.runtime.onInstalled.addListener(() => { rebuildScriptMenus().catch(() => {}); });
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'kv-install-link' && info.linkUrl) openInstallPage(info.linkUrl);
-  if (info.menuItemId === 'kv-install-page' && tab?.url) openInstallPage(tab.url);
+  else if (info.menuItemId === 'kv-install-page' && tab?.url) openInstallPage(tab.url);
+  else if (typeof info.menuItemId === 'string' && info.menuItemId.startsWith('kv-run-') && tab?.id !== undefined) runContextMenuScript(tab.id, info.menuItemId.slice(7)).catch(console.error);
+});
+
+// ── GM_notification / GM_download event forwarding to the page ────
+chrome.notifications.onClosed.addListener(nid => {
+  const cb = notifCallbacks.get(nid); if (!cb) return;
+  notifCallbacks.delete(nid);
+  if (cb.tabId !== undefined) chrome.tabs.sendMessage(cb.tabId, { __kvNotif: { nid: cb.nid, type: 'close', obj: {} } }).catch(() => {});
+});
+chrome.notifications.onClicked.addListener(nid => {
+  const cb = notifCallbacks.get(nid); if (!cb) return;
+  notifCallbacks.delete(nid);
+  if (cb.tabId !== undefined) chrome.tabs.sendMessage(cb.tabId, { __kvNotif: { nid: cb.nid, type: 'click', obj: {} } }).catch(() => {});
+});
+chrome.downloads.onChanged.addListener(d => {
+  const cb = d.id !== undefined ? dlCallbacks.get(d.id) : null;
+  if (!cb || !d.state) return;
+  if (d.state.current === 'complete') { dlCallbacks.delete(d.id); if (cb.tabId !== undefined) chrome.tabs.sendMessage(cb.tabId, { __kvDL: { did: cb.did, ok: true, downloadId: d.id } }).catch(() => {}); }
+  else if (d.state.current === 'interrupted') { dlCallbacks.delete(d.id); if (cb.tabId !== undefined) chrome.tabs.sendMessage(cb.tabId, { __kvDL: { did: cb.did, ok: false, err: d.error || 'interrupted' } }).catch(() => {}); }
 });
 
 // ── Message Router ────────────────────────────────────────────────
@@ -581,9 +713,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   }
   const H = {
     GET_SCRIPTS: () => getScripts(),
-    SAVE_SCRIPT: () => installScript(msg.code, msg.sourceUrl),
-    DELETE_SCRIPT: async () => { const s=await getScripts(); delete s[msg.id]; await saveScripts(s); return {ok:true}; },
-    TOGGLE_SCRIPT: async () => { const s=await getScripts(); if(s[msg.id]){s[msg.id].enabled=msg.enabled;await saveScripts(s);} return {ok:true}; },
+    SAVE_SCRIPT: async () => { const r = await installScript(msg.code, msg.sourceUrl); rebuildScriptMenus().catch(() => {}); return r; },
+    DELETE_SCRIPT: async () => { const s=await getScripts(); delete s[msg.id]; await saveScripts(s); rebuildScriptMenus().catch(() => {}); return {ok:true}; },
+    TOGGLE_SCRIPT: async () => { const s=await getScripts(); if(s[msg.id]){s[msg.id].enabled=msg.enabled;await saveScripts(s);} rebuildScriptMenus().catch(() => {}); return {ok:true}; },
     GET_LOGS: () => get('kv_logs').then(l => l||[]),
     CLEAR_LOGS: async () => { await set('kv_logs',[]); return {ok:true}; },
     GET_NETLOG: () => get('kv_netlog').then(l => l||[]),
@@ -595,8 +727,28 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     GET_TAB_SCRIPTS: async () => { const [scripts,siteSettings]=await Promise.all([getScripts(),getSiteSettings()]); return {scripts:Object.values(scripts).filter(s=>scriptMatchesUrl(s,msg.url)),siteSettings}; },
     SCAN_SCRIPT: () => Promise.resolve(scanScript(msg.code)),
     PARSE_META: () => Promise.resolve(parseMeta(msg.code)),
-    BUILD_DEFAULT: () => Promise.resolve(buildDefaultMeta(msg.host)),
+    BUILD_DEFAULT: () => buildDefaultMeta(msg.host),
     CHECK_UPDATES: () => checkUpdates().then(n=>({ok:true,updated:n})),
+    CHECK_UPDATE_SCRIPT: async () => {
+      const scripts = await getScripts(); const s = scripts[msg.id];
+      if (!s) return { ok:false, err:'Script not found' };
+      const url = s.meta?.updateURL || s.meta?.downloadURL;
+      if (!url) return { ok:false, err:'This script has no @updateURL' };
+      const res = await fetch(url, { cache:'no-cache' });
+      if (!res.ok) return { ok:false, err:'Update check failed: HTTP ' + res.status };
+      const code = await res.text();
+      const nm = parseMeta(code);
+      if (semverGt(nm.version, s.meta?.version)) { const r = await installScript(code, url); return { ok:true, updated:true, name:nm.name, current:s.meta?.version, latest:nm.version }; }
+      return { ok:true, updated:false, name:nm.name, current:s.meta?.version, latest:nm.version };
+    },
+    DUPLICATE_SCRIPT: async () => {
+      const scripts = await getScripts(); const s = scripts[msg.id];
+      if (!s) return { ok:false, err:'Script not found' };
+      const code = String(s.code).replace(/(\/\/\s*@name\s+)(.+)/, (m, p, rest) => `${p}${rest.trim()} (copy)`);
+      const r = await installScript(code, s.sourceUrl || 'duplicate');
+      return { ok:true, id:r.id, name:r.script?.meta?.name, isUpdate:r.isUpdate };
+    },
+    RESET_STATS: async () => { const scripts=await getScripts(); if(scripts[msg.id]){ scripts[msg.id].runCount=0; scripts[msg.id].errorCount=0; await saveScripts(scripts);} return {ok:true}; },
     GET_STORAGE: async () => { const store=(await get('kv_store'))||{}; const pre=msg.id+':'; const out={}; for(const[k,v]of Object.entries(store))if(k.startsWith(pre))out[k.slice(pre.length)]=v; return out; },
     CLEAR_STORAGE: async () => { const store=(await get('kv_store'))||{}; const pre=msg.id+':'; for(const k of Object.keys(store))if(k.startsWith(pre))delete store[k]; await set('kv_store',store); return {ok:true}; },
     EXEC_CMD: () => { chrome.tabs.sendMessage(msg.tabId,{__kvCmd:{n:msg.name,sid:msg.scriptId}}).catch(()=>{}); return Promise.resolve(true); },

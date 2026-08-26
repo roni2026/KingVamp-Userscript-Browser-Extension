@@ -86,6 +86,9 @@ function showDetail(s) {
   $('detailEnabled').onchange=async()=>{await msg('TOGGLE_SCRIPT',{id:s.id,enabled:$('detailEnabled').checked});allScripts[s.id].enabled=$('detailEnabled').checked;renderScripts();};
   $('detailEdit').onclick=()=>chrome.tabs.create({url:editorUrl(s.id)});
   $('detailExport').onclick=()=>exportScript(s);
+  $('detailDuplicate').onclick=async()=>{const r=await msg('DUPLICATE_SCRIPT',{id:s.id});if(r?.ok){allScripts=r.id?await msg('GET_SCRIPTS'):allScripts;if(allScripts[r.id]){selectedId=r.id;renderScripts();showDetail(allScripts[r.id]);}}else if(r?.err)alert(r.err);};
+  $('detailCheckUpdate').onclick=async()=>{const btn=$('detailCheckUpdate');btn.textContent='Checking…';btn.disabled=true;const r=await msg('CHECK_UPDATE_SCRIPT',{id:s.id});btn.textContent='Update';btn.disabled=false;if(r?.updated)alert(`Updated to v${r.latest}`);else if(r?.err)alert(r.err);else alert(`Already up to date (v${r.latest}).`);};
+  $('detailResetStats').onclick=async()=>{if(!confirm('Reset run/error counters for this script?'))return;await msg('RESET_STATS',{id:s.id});allScripts[s.id].runCount=0;allScripts[s.id].errorCount=0;showDetail(allScripts[s.id]);renderScripts();};
   $('detailDelete').onclick=async()=>{ if(!confirm(`Delete "${m.name||s.id}"?`))return; await msg('DELETE_SCRIPT',{id:s.id}); delete allScripts[s.id]; panel.classList.add('hidden'); selectedId=null; renderScripts(); };
   $('detailClose').onclick=()=>{ panel.classList.add('hidden'); selectedId=null; document.querySelectorAll('.script-row').forEach(r=>r.classList.remove('selected')); };
 }
@@ -159,6 +162,7 @@ async function generateScript(){
 async function loadSettings(){
   const s=await msg('GET_SETTINGS'),siteSettings=await msg('GET_SITE_SETTINGS')||{};
   $('setGlobal').checked=s.globalEnabled!==false;$('setBadge').checked=s.showBadge!==false;$('setAutoUpdate').checked=s.autoUpdate!==false;$('setLogLimit').value=s.logLimit||500;
+  $('setLogLevel').value=s.logLevel||'all';$('setDefaultRunAt').value=s.defaultRunAt||'document-idle';
   // editor settings
   $('setEdTheme').value=s.editorTheme||'dracula';$('setEdKeymap').value=s.editorKeymap||'default';
   $('setEdTabSize').value=String(s.editorTabSize||2);$('setEdFontSize').value=String(s.editorFontSize||13);
@@ -168,7 +172,7 @@ async function loadSettings(){
   renderBlocklist(blocked,siteSettings);
   $('btnAddBlock').onclick=async()=>{const host=$('blocklistInput').value.trim().replace(/^https?:\/\//,'').split('/')[0];if(!host)return;siteSettings[host]={...siteSettings[host],disabled:true};await msg('SAVE_SITE_SETTINGS',{siteSettings});$('blocklistInput').value='';loadSettings();};
   chrome.storage.local.getBytesInUse(null,bytes=>{$('storageInfo').innerHTML=`<div class="setting-row"><div class="setting-info"><div class="setting-name">Local Storage Used</div><div class="setting-desc">Scripts, logs, values, settings</div></div><span style="font-family:var(--mono);font-size:13px">${(bytes/1024).toFixed(1)} KB</span></div>`;});
-  $('btnSaveSettings').onclick=async()=>{const updated={...s,globalEnabled:$('setGlobal').checked,showBadge:$('setBadge').checked,autoUpdate:$('setAutoUpdate').checked,logLimit:parseInt($('setLogLimit').value)||500};await msg('SAVE_SETTINGS',{settings:updated});updateHdrStatus(updated.globalEnabled);$('btnSaveSettings').textContent='Saved!';setTimeout(()=>{$('btnSaveSettings').textContent='Save Settings';},1500);};
+  $('btnSaveSettings').onclick=async()=>{const updated={...s,globalEnabled:$('setGlobal').checked,showBadge:$('setBadge').checked,autoUpdate:$('setAutoUpdate').checked,logLimit:parseInt($('setLogLimit').value)||500,logLevel:$('setLogLevel').value||'all',defaultRunAt:$('setDefaultRunAt').value||'document-idle'};await msg('SAVE_SETTINGS',{settings:updated});updateHdrStatus(updated.globalEnabled);$('btnSaveSettings').textContent='Saved!';setTimeout(()=>{$('btnSaveSettings').textContent='Save Settings';},1500);};
   $('btnResetSettings').onclick=async()=>{if(!confirm('Reset all settings to defaults?'))return;await msg('SAVE_SETTINGS',{settings:{globalEnabled:true,autoUpdate:true,showBadge:true,logLimit:500}});loadSettings();};
 }
 function renderBlocklist(blocked,siteSettings){
