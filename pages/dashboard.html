@@ -263,6 +263,21 @@
           <div class="settings-section"><h2>Console &amp; Logging</h2>
             <div class="card"><div class="setting-row"><div class="setting-info"><div class="setting-name">Max Log Entries</div><div class="setting-desc">Trim the console log to this many entries</div></div><input type="text" id="setLogLimit" style="width:80px;text-align:right"></div></div>
           </div>
+          <div class="settings-section"><h2>Editor</h2>
+            <div class="card">
+              <div class="form-row">
+                <div class="form-group"><label>Theme</label><select id="setEdTheme"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="material">Material</option><option value="solarized dark">Solarized Dark</option><option value="solarized light">Solarized Light</option><option value="default">Default</option></select></div>
+                <div class="form-group"><label>Keymap</label><select id="setEdKeymap"><option value="default">Default</option><option value="sublime">Sublime Text</option><option value="vim">Vim</option><option value="emacs">Emacs</option></select></div>
+              </div>
+              <div class="form-row">
+                <div class="form-group"><label>Tab Size</label><select id="setEdTabSize"><option>2</option><option>4</option><option>8</option></select></div>
+                <div class="form-group"><label>Font Size</label><select id="setEdFontSize"><option>11</option><option>12</option><option selected>13</option><option>14</option><option>16</option><option>18</option></select></div>
+              </div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Word Wrap</div><div class="setting-desc">Wrap long lines in the editor</div></div><label class="switch"><input type="checkbox" id="setEdWrap"><span class="track"></span></label></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Live Lint</div><div class="setting-desc">Show syntax errors &amp; warnings beside lines</div></div><label class="switch"><input type="checkbox" id="setEdLint" checked><span class="track"></span></label></div>
+              <div class="setting-row"><div class="setting-info"><div class="setting-name">Auto-Save</div><div class="setting-desc">Save the script 1.5s after you stop typing</div></div><label class="switch"><input type="checkbox" id="setEdAutoSave"><span class="track"></span></label></div>
+            </div>
+          </div>
           <div class="settings-section"><h2>Site Blocklist</h2>
             <div class="card">
               <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Domains where KingVamp is always disabled.</p>

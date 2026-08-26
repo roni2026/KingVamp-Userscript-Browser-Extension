@@ -1,4 +1,4 @@
-// KingVamp Install Page v2.0.0
+// KingVamp Install Page v3.0.0
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const msg = (type, data={}) => chrome.runtime.sendMessage({ type, ...data });
 const GM_PERM_DESCRIPTIONS = {

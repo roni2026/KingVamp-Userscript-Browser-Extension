@@ -1,4 +1,4 @@
-// KingVamp Dashboard v2.0.0
+// KingVamp Dashboard v3.0.0
 const $ = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const msg = (type, data = {}) => chrome.runtime.sendMessage({ type, ...data });
@@ -132,7 +132,7 @@ async function loadTools(){
   $('btnClearStorage').onclick=async()=>{if(!confirm('Clear all stored values for this script?'))return;await msg('CLEAR_STORAGE',{id:sel.value});loadStorage();};
   $('btnExportZip').onclick=()=>exportZip();$('btnExportJson').onclick=()=>exportJson();
   $('btnImportJson').onclick=()=>$('backupFile').click();$('backupFile').onchange=e=>importJson(e.target.files[0]);
-  $('btnCheckUpdates').onclick=async()=>{$('btnCheckUpdates').textContent='Checking…';$('btnCheckUpdates').disabled=true;await msg('CHECK_UPDATES');$('btnCheckUpdates').textContent='Check for Updates';$('btnCheckUpdates').disabled=false;$('updateResult').textContent='Update check complete.'};
+  $('btnCheckUpdates').onclick=async()=>{$('btnCheckUpdates').textContent='Checking…';$('btnCheckUpdates').disabled=true;const r=await msg('CHECK_UPDATES');$('btnCheckUpdates').textContent='Check for Updates';$('btnCheckUpdates').disabled=false;$('updateResult').textContent=r?.updated?`Updated ${r.updated} script${r.updated!==1?'s':''} to the latest version.`:'All scripts are up to date.'};
 }
 let aiGenerated='';
 async function loadAiSettings(){
@@ -159,6 +159,11 @@ async function generateScript(){
 async function loadSettings(){
   const s=await msg('GET_SETTINGS'),siteSettings=await msg('GET_SITE_SETTINGS')||{};
   $('setGlobal').checked=s.globalEnabled!==false;$('setBadge').checked=s.showBadge!==false;$('setAutoUpdate').checked=s.autoUpdate!==false;$('setLogLimit').value=s.logLimit||500;
+  // editor settings
+  $('setEdTheme').value=s.editorTheme||'dracula';$('setEdKeymap').value=s.editorKeymap||'default';
+  $('setEdTabSize').value=String(s.editorTabSize||2);$('setEdFontSize').value=String(s.editorFontSize||13);
+  $('setEdWrap').checked=!!s.editorWrap;$('setEdLint').checked=s.editorLint!==false;$('setEdAutoSave').checked=!!s.editorAutoSave;
+  ['setEdTheme','setEdKeymap','setEdTabSize','setEdFontSize','setEdWrap','setEdLint','setEdAutoSave'].forEach(id=>{$(id).onchange=async()=>{const m={editorTheme:$('setEdTheme').value,editorKeymap:$('setEdKeymap').value,editorTabSize:+$('setEdTabSize').value,editorFontSize:+$('setEdFontSize').value,editorWrap:$('setEdWrap').checked,editorLint:$('setEdLint').checked,editorAutoSave:$('setEdAutoSave').checked};await msg('SAVE_SETTINGS',{settings:{...s,...m}});};});
   const blocked=Object.entries(siteSettings).filter(([,v])=>v?.disabled).map(([k])=>k);
   renderBlocklist(blocked,siteSettings);
   $('btnAddBlock').onclick=async()=>{const host=$('blocklistInput').value.trim().replace(/^https?:\/\//,'').split('/')[0];if(!host)return;siteSettings[host]={...siteSettings[host],disabled:true};await msg('SAVE_SITE_SETTINGS',{siteSettings});$('blocklistInput').value='';loadSettings();};
@@ -177,8 +182,8 @@ async function handleImportFiles(e){
 }
 function exportScript(s){const blob=new Blob([s.code],{type:'text/javascript'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(s.meta?.name||s.id).replace(/[^\w.-]/g,'_')+'.user.js';a.click();}
 function exportAllScripts(){const scripts=Object.values(allScripts);if(!scripts.length)return;const blob=new Blob([scripts.map(s=>`// FILE: ${s.meta?.name||s.id}.user.js\n${s.code}`).join('\n\n// ---\n\n')],{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='KingVamp_scripts.txt';a.click();}
-async function exportJson(){const blob=new Blob([JSON.stringify({version:'2.0.0',exported:new Date().toISOString(),scripts:allScripts},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.json';a.click();}
-async function exportZip(){const scripts=Object.values(allScripts),parts=['KingVamp Backup\n=====\n\n',JSON.stringify({version:'2.0.0',exported:new Date().toISOString()},null,2),'\n\n'];scripts.forEach(s=>parts.push(`\n--- ${s.meta?.name||s.id} ---\n${s.code}\n`));const blob=new Blob(parts,{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.txt';a.click();}
+async function exportJson(){const blob=new Blob([JSON.stringify({version:'3.0.0',exported:new Date().toISOString(),scripts:allScripts},null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.json';a.click();}
+async function exportZip(){const scripts=Object.values(allScripts),parts=['KingVamp Backup\n=====\n\n',JSON.stringify({version:'3.0.0',exported:new Date().toISOString()},null,2),'\n\n'];scripts.forEach(s=>parts.push(`\n--- ${s.meta?.name||s.id} ---\n${s.code}\n`));const blob=new Blob(parts,{type:'text/plain'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='kingvamp-backup.txt';a.click();}
 async function importJson(file){if(!file)return;try{const data=JSON.parse(await file.text()),scripts=data.scripts||{};let count=0;for(const s of Object.values(scripts)){if(s.code){await msg('SAVE_SCRIPT',{code:s.code,sourceUrl:'backup'});count++;}}allScripts=await msg('GET_SCRIPTS');renderScripts();alert(`Imported ${count} scripts.`);}catch(e){alert('Import failed: '+e.message);}}
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',async e=>{e.preventDefault();const files=[...e.dataTransfer.files].filter(f=>f.name.endsWith('.js'));for(const file of files)await msg('SAVE_SCRIPT',{code:await file.text(),sourceUrl:file.name});if(files.length){allScripts=await msg('GET_SCRIPTS');renderScripts();switchTab('scripts');}});

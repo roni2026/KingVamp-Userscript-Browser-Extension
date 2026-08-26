@@ -3,9 +3,14 @@
   "name": "KingVamp",
   "version": "3.0.0",
   "description": "KingVamp by Roni — privacy-first userscript manager. Full GM API, advanced code editor with live linting, safety scanner, network monitor, and element picker. 100% local.",
-  "minimum_chrome_version": "102",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "kingvamp@roni.dev",
+      "strict_min_version": "128.0"
+    }
+  },
   "background": {
-    "service_worker": "src/background.js"
+    "scripts": ["src/background.js"]
   },
   "content_scripts": [
     {

@@ -1,4 +1,4 @@
-// KingVamp Popup v2.0.0
+// KingVamp Popup v3.0.0
 const $=id=>document.getElementById(id);
 const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const msg=(type,data={})=>chrome.runtime.sendMessage({type,...data});
@@ -46,6 +46,8 @@ function renderCommands(){
 function bindButtons(){
   $('btnHide').addEventListener('click',async()=>{await msg('INJECT_PICKER',{tabId:tab.id});window.close();});
   $('btnNew').addEventListener('click',()=>{chrome.tabs.create({url:editorUrl()+'&host='+encodeURIComponent(hostname)});window.close();});
+  $('btnInstallUrl').addEventListener('click',()=>{const u=$('installUrl').value.trim();if(!u)return;if(!/^https?:\/\//i.test(u)){alert('Enter a full http(s) URL ending in .user.js');return;}chrome.tabs.create({url:chrome.runtime.getURL('pages/install.html?url='+encodeURIComponent(u))});window.close();});
+  $('installUrl').addEventListener('keydown',e=>{if(e.key==='Enter')$('btnInstallUrl').click();});
   $('btnDash').addEventListener('click',()=>{chrome.runtime.openOptionsPage();window.close();});
   $('footLogs').addEventListener('click',e=>{e.preventDefault();chrome.tabs.create({url:dashUrl('logs')});window.close();});
   $('footSettings').addEventListener('click',e=>{e.preventDefault();chrome.tabs.create({url:dashUrl('settings')});window.close();});

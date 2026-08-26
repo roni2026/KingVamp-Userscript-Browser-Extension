@@ -1,0 +1,16 @@
+{
+  "name": "kingvamp",
+  "version": "3.0.0",
+  "description": "KingVamp — privacy-first, cross-browser userscript manager (Tampermonkey alternative)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node test/background.test.mjs",
+    "check": "node --check src/background.js && node --check src/bridge.js && node --check src/installDetect.js && node --check pages/editor.js && node --check pages/dashboard.js && node --check pages/popup.js && node --check pages/install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

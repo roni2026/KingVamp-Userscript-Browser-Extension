@@ -2,17 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KingVamp Editor</title>
   <link rel="stylesheet" href="../assets/theme.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/addon/dialog/dialog.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/addon/hint/show-hint.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/addon/fold/foldgutter.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/addon/lint/lint.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/addon/display/fullscreen.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/theme/dracula.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/theme/monokai.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/theme/material.min.css">
+  <link rel="stylesheet" href="../lib/codemirror/theme/solarized.min.css">
   <style>
     html,body{height:100%;overflow:hidden}
     body{display:flex;flex-direction:column}
     #app{display:flex;flex-direction:column;height:100vh}
     .editor-main{display:flex;flex:1;overflow:hidden}
-    .editor-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column}
-    .CodeMirror{height:100%!important;font-family:var(--mono)!important;font-size:13px!important;background:var(--bg)!important;color:var(--text)!important}
+    .editor-col{flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+    .editor-wrap{flex:1;overflow:hidden;display:flex;flex-direction:column;position:relative}
+    .CodeMirror{height:100%!important;font-family:var(--mono)!important;font-size:13px!important;background:var(--bg)!important;color:var(--text)!important;flex:1}
     .CodeMirror-scroll{height:100%!important}
     .CodeMirror-gutters{background:var(--bg2)!important;border-right:1px solid var(--border)!important}
     .CodeMirror-linenumber{color:var(--muted2)!important}
@@ -20,17 +30,71 @@
     .CodeMirror-selected{background:rgba(225,6,44,0.15)!important}
     .CodeMirror-focused .CodeMirror-selected{background:rgba(225,6,44,0.2)!important}
     .cm-searching{background:rgba(245,158,11,0.25)!important;outline:1px solid var(--yellow)!important}
-    .sidebar{width:260px;border-left:1px solid var(--border);overflow-y:auto;background:var(--bg2);display:flex;flex-direction:column;flex-shrink:0}
-    .sidebar-section{padding:14px;border-bottom:1px solid var(--border)}
-    .sidebar-section h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted2);margin-bottom:10px}
+    .cm-matchhighlight{background:rgba(245,158,11,0.15)!important}
+    .CodeMirror-activeline-background{background:rgba(255,255,255,0.035)!important}
+    .CodeMirror-lint-tooltip{background:var(--card)!important;border:1px solid var(--border2)!important;color:var(--text)!important;border-radius:6px;font-size:11px;z-index:50}
+    .CodeMirror-lint-marker-error,.CodeMirror-lint-marker-warning{cursor:pointer}
+    .CodeMirror-foldmarker{color:var(--red);text-shadow:none}
+    .error-mark{position:absolute;left:2px;right:2px;bottom:-1px;border-bottom:2px solid rgba(225,6,44,0.85)}
+    .warn-mark{position:absolute;left:2px;right:2px;bottom:-1px;border-bottom:2px dotted rgba(245,158,11,0.9)}
+
+    /* ── Toolbar ── */
+    .kv-head.editor-toolbar{gap:4px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+    .kv-head.editor-toolbar::-webkit-scrollbar{display:none}
+    .editor-toolbar .toolbar-spacer{flex:1;min-width:12px}
+    .tool-btn{display:inline-flex;align-items:center;gap:5px;background:none;border:none;color:var(--muted);border-radius:6px;padding:5px 7px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background var(--t),color var(--t)}
+    .tool-btn:hover{background:var(--bg3);color:var(--text)}
+    .tool-btn.active{background:var(--red-gl);color:var(--red)}
+    .tool-btn:disabled{opacity:0.35;cursor:default;pointer-events:none}
+    .tool-sep{width:1px;height:18px;background:var(--border);margin:0 4px;flex-shrink:0}
+    .tool-btn.labeled{padding:5px 10px;border:1px solid var(--border)}
+    .tool-btn.labeled:hover{border-color:var(--red)}
+
+    /* ── Error panel ── */
+    .error-panel{display:none;flex-direction:column;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;max-height:34%}
+    .error-panel.open{display:flex}
+    .error-head{display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border);font-size:11px}
+    .error-head .err-count{font-family:var(--mono)}
+    .error-head .err-filter{display:flex;gap:4px;margin-left:auto}
+    .err-chip{border:none;background:none;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;padding:3px 8px;border-radius:10px;cursor:pointer}
+    .err-chip.active{background:var(--bg3);color:var(--text)}
+    .err-list{overflow-y:auto;font-size:11.5px;font-family:var(--mono)}
+    .err-row{display:flex;align-items:baseline;gap:10px;padding:4px 12px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03)}
+    .err-row:hover{background:var(--bg3)}
+    .err-row .e-sev{width:46px;flex-shrink:0;font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px;text-align:center}
+    .err-row .e-sev.error{background:rgba(225,6,44,0.15);color:var(--red)}
+    .err-row .e-sev.warning{background:rgba(245,158,11,0.12);color:var(--yellow)}
+    .err-row .e-sev.info{background:rgba(59,130,246,0.12);color:var(--blue)}
+    .err-row .e-pos{color:var(--muted2);flex-shrink:0}
+    .err-row .e-msg{color:var(--text);word-break:break-word}
+    .err-empty{padding:14px 12px;color:var(--green);font-size:12px;display:flex;align-items:center;gap:8px;font-family:var(--font)}
+
+    /* ── Status bar ── */
+    .status-bar{display:flex;align-items:center;gap:12px;padding:5px 14px;border-top:1px solid var(--border);background:var(--bg2);font-size:11px;color:var(--muted);flex-shrink:0;font-family:var(--mono);overflow-x:auto;scrollbar-width:none}
+    .status-bar::-webkit-scrollbar{display:none}
+    .status-item{display:flex;align-items:center;gap:5px;white-space:nowrap}
+    .status-sep{width:1px;height:12px;background:var(--border);flex-shrink:0}
+    .status-err{color:var(--red);cursor:pointer}
+    .status-warn{color:var(--yellow);cursor:pointer}
+    #statusDirty{color:var(--yellow)}
+    #statusDirty:not(.visible){display:none}
+    .status-bar .toolbar-spacer{flex:1;min-width:20px}
+    .kbd{font-size:9px;color:var(--muted2);border:1px solid var(--border2);border-radius:3px;padding:0 3px}
+
+    /* ── Sidebar ── */
+    .sidebar{width:268px;border-left:1px solid var(--border);overflow-y:auto;background:var(--bg2);display:flex;flex-direction:column;flex-shrink:0;transition:width .15s ease,margin .15s ease}
+    .sidebar.collapsed{width:0;border-left:none;margin-right:0;overflow:hidden}
+    .sidebar-section{padding:14px;border-bottom:1px solid var(--border);flex-shrink:0}
+    .sidebar-section h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted2);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
     .meta-field{margin-bottom:8px}
     .meta-field label{display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted);margin-bottom:4px}
     .meta-field input,.meta-field select,.meta-field textarea{width:100%;font-size:12px;padding:5px 8px}
     .meta-field textarea{min-height:50px;resize:vertical}
     .match-list{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
     .match-row{display:flex;gap:4px}
-    .match-row input{flex:1;font-size:11px;padding:4px 7px}
+    .match-row input{flex:1;font-size:11px;padding:4px 7px;font-family:var(--mono)}
     .match-row button{padding:4px 7px}
+    .check-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);padding:3px 0}
     .scan-results{font-size:11px}
     .scan-ok{color:var(--green);display:flex;align-items:center;gap:6px}
     .scan-item-sm{padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:flex-start}
@@ -39,62 +103,108 @@
     .scan-sev-sm.danger{background:rgba(225,6,44,0.15);color:var(--red)}
     .scan-sev-sm.warn{background:rgba(245,158,11,0.1);color:var(--yellow)}
     .scan-sev-sm.info{background:rgba(59,130,246,0.1);color:var(--blue)}
-    .status-bar{display:flex;align-items:center;gap:12px;padding:5px 14px;border-top:1px solid var(--border);background:var(--bg2);font-size:11px;color:var(--muted);flex-shrink:0;font-family:var(--mono)}
-    .status-bar .status-item{display:flex;align-items:center;gap:5px}
-    .status-bar .status-sep{width:1px;height:12px;background:var(--border)}
-    #statusDirty{color:var(--yellow)}
-    #statusDirty:not(.visible){display:none}
-    .editor-toolbar{gap:6px;flex-wrap:nowrap;overflow-x:auto}
-    .editor-toolbar .toolbar-spacer{flex:1;min-width:20px}
+    #scriptInfo{font-size:11px;color:var(--muted);display:grid;grid-template-columns:auto 1fr;gap:4px 10px}
+    #scriptInfo dt{color:var(--muted2);font-size:10px;text-transform:uppercase;letter-spacing:0.5px}
+    #scriptInfo dd{font-size:11px;margin:0}
+
+    /* ── Settings popover ── */
+    .settings-pop{position:absolute;top:46px;right:12px;width:250px;background:var(--card);border:1px solid var(--border2);border-radius:var(--r);box-shadow:0 12px 32px rgba(0,0,0,0.5);padding:14px;z-index:100;display:none}
+    .settings-pop.open{display:block}
+    .settings-pop h4{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:var(--muted2);margin-bottom:10px}
+    .settings-pop .meta-field{margin-bottom:10px}
+    .settings-pop select,.settings-pop input{width:100%;font-size:12px;padding:5px 8px}
+
+    @media (max-width: 880px){
+      .sidebar{position:fixed;right:0;top:46px;bottom:0;z-index:60;box-shadow:-8px 0 24px rgba(0,0,0,.4)}
+      .sidebar.collapsed{width:0}
+    }
   </style>
 </head>
 <body>
 <div id="app">
   <div class="kv-head editor-toolbar">
     <div class="logo">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
         <path d="M3 18L3 7L8 11L12 4L16 11L21 7L21 18Z" fill="#e1062c"/>
         <path d="M8 20L9.5 20L8.75 23ZM14.5 20L16 20L15.25 23Z" fill="#eceaf2"/>
       </svg>
-      <span class="brand-name" style="font-size:14px">King<span class="vamp">Vamp</span></span>
     </div>
-    <div style="width:1px;height:20px;background:var(--border);margin:0 4px"></div>
-    <span id="editorTitle" style="font-size:13px;font-weight:600;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">New Script</span>
-    <span id="statusDirty">●</span>
+    <div style="width:1px;height:20px;background:var(--border)"></div>
+    <span id="editorTitle" style="font-size:13px;font-weight:600;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">New Script</span>
+    <span id="statusDirty" title="Unsaved changes">●</span>
     <div class="toolbar-spacer"></div>
-    <div class="btn-group">
-      <button class="btn sm" id="btnUndo" title="Undo (Ctrl+Z)">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
-      </button>
-      <button class="btn sm" id="btnRedo" title="Redo (Ctrl+Y)">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-      </button>
-    </div>
-    <button class="btn sm" id="btnFormat" title="Format code">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="7" y2="18"/></svg>
-      Format
-    </button>
-    <button class="btn sm" id="btnFind" title="Find (Ctrl+F)">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      Find
-    </button>
-    <button class="btn sm" id="btnScanNow" title="Run safety scan">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      Scan
-    </button>
-    <div style="width:1px;height:20px;background:var(--border);margin:0 4px"></div>
-    <button class="btn sm" id="btnDash">← Dashboard</button>
-    <button class="btn sm primary" id="btnSave">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      Save
-    </button>
+
+    <button class="tool-btn" id="btnUndo" title="Undo (Ctrl+Z)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg></button>
+    <button class="tool-btn" id="btnRedo" title="Redo (Ctrl+Y)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg></button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="btnFormat" title="Format / beautify code (Ctrl+Shift+F)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="7" y2="18"/></svg></button>
+    <button class="tool-btn" id="btnFind" title="Find (Ctrl+F)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+    <button class="tool-btn" id="btnReplace" title="Replace (Ctrl+H)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="17 2 21 6 17 10"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 22 3 18 7 14"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button>
+    <button class="tool-btn" id="btnGoto" title="Go to line (Ctrl+G)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><circle cx="11" cy="11" r="2"/></svg></button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="btnComment" title="Toggle comment (Ctrl+/)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></button>
+    <button class="tool-btn" id="btnFoldAll" title="Fold all (Ctrl+Shift+[)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+    <button class="tool-btn" id="btnUnfoldAll" title="Unfold all (Ctrl+Shift+])"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="btnPrevErr" title="Previous error (Shift+F8)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+    <button class="tool-btn" id="btnNextErr" title="Next error (F8)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+    <button class="tool-btn labeled" id="btnLintToggle" title="Toggle real-time linting"><span id="lintDot">✓</span> Lint</button>
+    <button class="tool-btn" id="btnScanNow" title="Run safety scan"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="btnFullscreen" title="Toggle fullscreen (F11)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg></button>
+    <button class="tool-btn" id="btnSettings" title="Editor settings"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+    <button class="tool-btn" id="btnSidebar" title="Toggle metadata sidebar"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
+    <div class="tool-sep"></div>
+    <button class="tool-btn" id="btnDash">← Dashboard</button>
+    <button class="tool-btn labeled" id="btnSave" style="background:var(--red);color:#fff;border-color:transparent">Save</button>
   </div>
 
   <div class="editor-main">
-    <div class="editor-wrap">
-      <textarea id="editor"></textarea>
+    <div class="editor-col">
+      <div class="editor-wrap">
+        <textarea id="editor"></textarea>
+
+        <div class="settings-pop" id="settingsPop">
+          <h4>Editor Settings</h4>
+          <div class="meta-field"><label>Theme</label><select id="setTheme">
+            <option value="dracula">Dracula</option>
+            <option value="monokai">Monokai</option>
+            <option value="material">Material</option>
+            <option value="solarized dark">Solarized Dark</option>
+            <option value="solarized light">Solarized Light</option>
+            <option value="default">Default</option>
+          </select></div>
+          <div class="meta-field"><label>Keymap</label><select id="setKeymap">
+            <option value="default">Default</option>
+            <option value="sublime">Sublime Text</option>
+            <option value="vim">Vim</option>
+            <option value="emacs">Emacs</option>
+          </select></div>
+          <div class="meta-field"><label>Tab Size</label><select id="setTabSize"><option>2</option><option>4</option><option>8</option></select></div>
+          <div class="meta-field"><label>Font Size</label><select id="setFontSize"><option>11</option><option>12</option><option selected>13</option><option>14</option><option>16</option><option>18</option></select></div>
+          <div class="check-row"><input type="checkbox" id="setWrap"><label for="setWrap" style="text-transform:none;font-size:12px">Word wrap</label></div>
+          <div class="check-row"><input type="checkbox" id="setLint" checked><label for="setLint" style="text-transform:none;font-size:12px">Live lint (errors in gutter)</label></div>
+          <div class="check-row"><input type="checkbox" id="setAutoSave"><label for="setAutoSave" style="text-transform:none;font-size:12px">Auto-save</label></div>
+          <button class="btn sm primary" id="btnResetEditor" style="width:100%;margin-top:8px">Reset Editor Defaults</button>
+        </div>
+      </div>
+
+      <div class="error-panel" id="errorPanel">
+        <div class="error-head">
+          <span class="err-count" id="errSummary"></span>
+          <div class="err-filter">
+            <button class="err-chip active" data-filter="all">All</button>
+            <button class="err-chip" data-filter="error">Errors</button>
+            <button class="err-chip" data-filter="warning">Warnings</button>
+            <button class="err-chip" data-filter="info">Info</button>
+          </div>
+          <button class="tool-btn" id="btnErrClose" title="Close panel">✕</button>
+        </div>
+        <div class="err-list" id="errList"></div>
+      </div>
     </div>
-    <div class="sidebar">
+
+    <div class="sidebar" id="sidebar">
       <div class="sidebar-section">
         <h4>Metadata</h4>
         <div class="meta-field"><label>Name</label><input type="text" id="mName" placeholder="My Script"></div>
@@ -113,15 +223,27 @@
         </div>
         <div class="meta-field"><label>Icon URL</label><input type="text" id="mIcon" placeholder="https://…/favicon.ico"></div>
         <div class="meta-field"><label>Update URL</label><input type="text" id="mUpdateUrl" placeholder="https://…/script.meta.js"></div>
+        <div class="meta-field"><label>Homepage URL</label><input type="text" id="mHomepage" placeholder="https://…"></div>
+        <div class="meta-field"><label>Support URL</label><input type="text" id="mSupport" placeholder="https://…"></div>
+        <div class="meta-field"><label>License</label><input type="text" id="mLicense" placeholder="MIT"></div>
+        <div class="check-row"><input type="checkbox" id="mNoFrames"><label for="mNoFrames">@noframes — don't run in iframes</label></div>
       </div>
       <div class="sidebar-section">
         <h4>Match Patterns</h4>
         <div class="match-list" id="matchList"></div>
-        <button class="btn ghost sm" id="btnAddMatch">+ Add @match</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn ghost sm" id="btnAddMatch" style="flex:1">+ Add @match</button>
+          <button class="btn ghost sm" id="btnMatchSite" title="Match current site">+ this site</button>
+        </div>
         <div style="margin-top:10px">
           <h4 style="margin-bottom:6px">Exclude</h4>
           <div class="match-list" id="excludeList"></div>
           <button class="btn ghost sm" id="btnAddExclude">+ Add @exclude</button>
+        </div>
+        <div style="margin-top:10px">
+          <h4 style="margin-bottom:6px">@connect</h4>
+          <div class="match-list" id="connectList"></div>
+          <button class="btn ghost sm" id="btnAddConnect">+ Add @connect</button>
         </div>
       </div>
       <div class="sidebar-section">
@@ -133,6 +255,10 @@
           <option value="GM_setValue">GM_setValue</option>
           <option value="GM_deleteValue">GM_deleteValue</option>
           <option value="GM_listValues">GM_listValues</option>
+          <option value="GM_addValueChangeListener">GM_addValueChangeListener</option>
+          <option value="GM_getTab">GM_getTab</option>
+          <option value="GM_saveTab">GM_saveTab</option>
+          <option value="GM_getTabs">GM_getTabs</option>
           <option value="GM_addStyle">GM_addStyle</option>
           <option value="GM_log">GM_log</option>
           <option value="GM_xmlhttpRequest">GM_xmlhttpRequest</option>
@@ -146,7 +272,6 @@
           <option value="GM_cookie.list">GM_cookie.list</option>
           <option value="GM_cookie.set">GM_cookie.set</option>
           <option value="GM_cookie.delete">GM_cookie.delete</option>
-          <option value="GM_addValueChangeListener">GM_addValueChangeListener</option>
           <option value="GM_info">GM_info</option>
           <option value="unsafeWindow">unsafeWindow</option>
           <option value="none">none</option>
@@ -158,12 +283,17 @@
         <button class="btn ghost sm" id="btnAddRequire">+ Add @require</button>
       </div>
       <div class="sidebar-section">
+        <h4>@resource</h4>
+        <div class="match-list" id="resourceList"></div>
+        <button class="btn ghost sm" id="btnAddResource">+ Add @resource</button>
+      </div>
+      <div class="sidebar-section">
         <h4>Safety Scan</h4>
         <div id="scanResults" class="scan-results"><span style="color:var(--muted)">Click Scan to analyse</span></div>
       </div>
       <div class="sidebar-section" id="scriptInfoBox" style="display:none">
         <h4>Script Info</h4>
-        <div id="scriptInfo" style="font-size:11px;color:var(--muted);display:grid;grid-template-columns:auto 1fr;gap:4px 10px"></div>
+        <div id="scriptInfo"></div>
       </div>
     </div>
   </div>
@@ -173,23 +303,44 @@
     <div class="status-sep"></div>
     <span class="status-item" id="statusLines">0 lines</span>
     <div class="status-sep"></div>
-    <span class="status-item">JavaScript</span>
+    <span class="status-item" id="statusWords">0 words</span>
+    <div class="status-sep"></div>
+    <span class="status-item status-err" id="statusErrors" title="Jump to error panel">0 errors</span>
+    <span class="status-item status-warn" id="statusWarns" title="Jump to error panel">0 warnings</span>
+    <div class="status-sep"></div>
+    <span class="status-item" id="statusSel" style="display:none"></span>
     <div class="toolbar-spacer"></div>
+    <span class="status-item">JavaScript</span>
+    <span class="status-item" id="statusKeymap"></span>
+    <div class="status-sep"></div>
     <span class="status-item" id="statusSaved"></span>
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/comment/comment.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
+<script src="../lib/codemirror/codemirror.min.js"></script>
+<script src="../lib/codemirror/mode/javascript/javascript.min.js"></script>
+<script src="../lib/codemirror/addon/edit/closebrackets.min.js"></script>
+<script src="../lib/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="../lib/codemirror/addon/comment/comment.min.js"></script>
+<script src="../lib/codemirror/addon/dialog/dialog.min.js"></script>
+<script src="../lib/codemirror/addon/search/searchcursor.min.js"></script>
+<script src="../lib/codemirror/addon/search/search.min.js"></script>
+<script src="../lib/codemirror/addon/search/match-highlighter.min.js"></script>
+<script src="../lib/codemirror/addon/hint/show-hint.min.js"></script>
+<script src="../lib/codemirror/addon/fold/foldcode.min.js"></script>
+<script src="../lib/codemirror/addon/fold/foldgutter.min.js"></script>
+<script src="../lib/codemirror/addon/fold/brace-fold.min.js"></script>
+<script src="../lib/codemirror/addon/fold/comment-fold.min.js"></script>
+<script src="../lib/codemirror/addon/fold/indent-fold.min.js"></script>
+<script src="../lib/jshint.min.js"></script>
+<script src="../lib/codemirror/addon/lint/lint.min.js"></script>
+<script src="../lib/codemirror/addon/lint/javascript-lint.min.js"></script>
+<script src="../lib/codemirror/addon/selection/active-line.min.js"></script>
+<script src="../lib/codemirror/addon/display/fullscreen.min.js"></script>
+<script src="../lib/codemirror/keymap/sublime.min.js"></script>
+<script src="../lib/codemirror/keymap/vim.min.js"></script>
+<script src="../lib/codemirror/keymap/emacs.min.js"></script>
+<script src="../lib/beautify.min.js"></script>
 <script src="editor.js"></script>
 </body>
 </html>
