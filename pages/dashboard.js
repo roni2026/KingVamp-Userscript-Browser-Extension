@@ -6,6 +6,21 @@ const fmtTime = ts => new Date(ts).toLocaleTimeString();
 const fmtDate = ts => new Date(ts).toLocaleDateString();
 const fmtSize = b => b > 1048576 ? (b/1048576).toFixed(1)+'MB' : b > 1024 ? (b/1024).toFixed(1)+'KB' : b+'B';
 const editorUrl = id => chrome.runtime.getURL('pages/editor.html') + (id ? '?id='+id : '?new=1');
+async function openEditorTab(opts = {}) {
+  const base = chrome.runtime.getURL('pages/editor.html');
+  const existing = await chrome.tabs.query({ url: base + '*' });
+  if (existing.length) {
+    await chrome.windows.update(existing[0].windowId, { focused: true });
+    await chrome.tabs.update(existing[0].id, { active: true });
+    chrome.runtime.sendMessage({ type: 'KV_OPEN_TAB', ...opts });
+  } else {
+    const p = new URLSearchParams();
+    if (opts.id) p.set('id', opts.id); else p.set('new', '1');
+    if (opts.host) p.set('host', opts.host);
+    if (opts.code) p.set('code', opts.code);
+    chrome.tabs.create({ url: base + '?' + p.toString() });
+  }
+}
 let allScripts = {}, settings = {}, selectedId = null;
 let logs = [], netlog = [];
 const tabs = document.querySelectorAll('.tab');
@@ -37,7 +52,7 @@ async function init() {
   $('importFile').addEventListener('change', handleImportFiles);
   $('btnImport').addEventListener('click', () => $('importFile').click());
   $('btnExport').addEventListener('click', exportAllScripts);
-  $('btnNew').addEventListener('click', () => chrome.tabs.create({ url: editorUrl() }));
+  $('btnNew').addEventListener('click', () => openEditorTab({}));
   $('scriptSearch').addEventListener('input', renderScripts);
   $('scriptSort').addEventListener('change', renderScripts);
 }
@@ -69,7 +84,7 @@ function renderScripts() {
     return `<div class="script-row${selectedId===s.id?' selected':''}" data-id="${s.id}"><div class="script-icon">${icon}</div><div class="script-info"><div class="script-name">${name}</div><div class="script-meta">${ver}${runAt}${errs}${runs}</div>${desc?`<div style="font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</div>`:''}<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${matches}</div></div><div class="script-actions"><button class="btn ghost icon" data-edit="${s.id}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button><label class="switch"><input type="checkbox" class="stoggle" data-id="${s.id}" ${s.enabled?'checked':''}><span class="track"></span></label></div></div>`;
   }).join('');
   list.querySelectorAll('.script-row').forEach(el => { el.addEventListener('click', e => { if(e.target.closest('button,label,input'))return; selectScript(el.dataset.id); }); });
-  list.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => chrome.tabs.create({ url: editorUrl(el.dataset.edit) })));
+  list.querySelectorAll('[data-edit]').forEach(el => el.addEventListener('click', () => openEditorTab({ id: el.dataset.edit })));
   list.querySelectorAll('.stoggle').forEach(el => el.addEventListener('change', async () => { await msg('TOGGLE_SCRIPT',{id:el.dataset.id,enabled:el.checked}); allScripts[el.dataset.id].enabled=el.checked; if(selectedId===el.dataset.id)showDetail(allScripts[el.dataset.id]); }));
 }
 function selectScript(id) { selectedId=id; document.querySelectorAll('.script-row').forEach(r=>r.classList.toggle('selected',r.dataset.id===id)); showDetail(allScripts[id]); }
@@ -84,7 +99,7 @@ function showDetail(s) {
   const scan=s.scanResults||[];
   $('detailScan').innerHTML=!scan.length?`<div class="scan-clean"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> No threats detected</div>`:scan.map(r=>`<div class="scan-item"><span class="scan-sev ${r.sev}">${r.sev}</span><span class="scan-msg">${esc(r.msg)}</span></div>`).join('');
   $('detailEnabled').onchange=async()=>{await msg('TOGGLE_SCRIPT',{id:s.id,enabled:$('detailEnabled').checked});allScripts[s.id].enabled=$('detailEnabled').checked;renderScripts();};
-  $('detailEdit').onclick=()=>chrome.tabs.create({url:editorUrl(s.id)});
+  $('detailEdit').onclick=()=>openEditorTab({ id: s.id });
   $('detailExport').onclick=()=>exportScript(s);
   $('detailDuplicate').onclick=async()=>{const r=await msg('DUPLICATE_SCRIPT',{id:s.id});if(r?.ok){allScripts=r.id?await msg('GET_SCRIPTS'):allScripts;if(allScripts[r.id]){selectedId=r.id;renderScripts();showDetail(allScripts[r.id]);}}else if(r?.err)alert(r.err);};
   $('detailCheckUpdate').onclick=async()=>{const btn=$('detailCheckUpdate');btn.textContent='Checking…';btn.disabled=true;const r=await msg('CHECK_UPDATE_SCRIPT',{id:s.id});btn.textContent='Update';btn.disabled=false;if(r?.updated)alert(`Updated to v${r.latest}`);else if(r?.err)alert(r.err);else alert(`Already up to date (v${r.latest}).`);};
@@ -124,7 +139,7 @@ const RECIPES=[
 ];
 async function loadTools(){
   $('recipeList').innerHTML=RECIPES.map((r,i)=>`<div class="recipe-item" data-idx="${i}"><div><div class="recipe-name">${esc(r.name)}</div><div class="recipe-desc">${esc(r.desc)}</div></div><button class="btn sm primary" data-idx="${i}">Use</button></div>`).join('');
-  $('recipeList').querySelectorAll('[data-idx]').forEach(el=>{el.addEventListener('click',e=>{const btn=e.target.closest('button');if(!btn)return;const r=RECIPES[btn.dataset.idx];chrome.tabs.create({url:editorUrl()+'&code='+encodeURIComponent(r.code)});});});
+  $('recipeList').querySelectorAll('[data-idx]').forEach(el=>{el.addEventListener('click',e=>{const btn=e.target.closest('button');if(!btn)return;const r=RECIPES[btn.dataset.idx];openEditorTab({ code: r.code });});});
   const hides=await msg('GET_HIDES')||{};
   const hideList=$('hideList');
   if(!Object.keys(hides).length){hideList.innerHTML='<span style="color:var(--muted);font-size:12px">No hidden elements yet.</span>';}else{hideList.innerHTML=`<table class="hide-table"><thead><tr><th>Site</th><th>Selector</th><th></th></tr></thead><tbody>${Object.entries(hides).flatMap(([site,sels])=>sels.map(sel=>`<tr><td>${esc(site)}</td><td>${esc(sel)}</td><td><button class="btn danger sm" data-site="${esc(site)}" data-sel="${esc(sel)}">×</button></td></tr>`)).join('')}</tbody></table>`;hideList.querySelectorAll('[data-site]').forEach(btn=>{btn.addEventListener('click',async()=>{await msg('CLEAR_HIDE',{url:btn.dataset.site,selector:btn.dataset.sel});loadTools();});});}

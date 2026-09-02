@@ -7,7 +7,8 @@ const msg = (type, data = {}) => chrome.runtime.sendMessage({ type, ...data });
 const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 let cm, scriptId = null, isDirty = false, currentMeta = {}, settings = {};
-let annotations = [], errFilter = 'all', lintEnabled = true, saveTimer = null;
+let annotations = [], errFilter = 'all', lintEnabled = true, saveTimer = null, metaSyncTimer = null;
+let tabs = [], activeKey = null;
 const params = new URLSearchParams(location.search);
 
 const GM_API = ['GM_getValue','GM_setValue','GM_deleteValue','GM_listValues','GM_addStyle','GM_log','GM_xmlhttpRequest','GM_notification','GM_openInTab','GM_setClipboard','GM_download','GM_getResourceText','GM_getResourceURL','GM_registerMenuCommand','GM_unregisterMenuCommand','GM_addValueChangeListener','GM_removeValueChangeListener','GM_getTab','GM_saveTab','GM_getTabs','GM_cookie','GM_info','unsafeWindow','GM'];
@@ -23,36 +24,92 @@ async function init() {
   applyEditorDefaults();
   initEditor();
 
-  const id = params.get('id'), isNew = params.get('new') === '1', host = params.get('host') || '';
+  const id = params.get('id'), host = params.get('host') || '';
   const preCode = params.get('code') ? decodeURIComponent(params.get('code')) : null;
-  if (id) {
-    scriptId = id;
-    const scripts = await msg('GET_SCRIPTS');
-    const sc = scripts[id];
-    if (sc) {
-      cm.setValue(sc.code || '');
-      loadMeta(sc.meta || {});
-      $('editorTitle').textContent = sc.meta?.name || id;
-      showScriptInfo(sc);
-      isDirty = false; setDirty(false);
-    }
-  } else {
-    const defaultCode = preCode || (await msg('BUILD_DEFAULT', { host }));
-    cm.setValue(defaultCode || '');
-    syncMetaFromCode();
-    setDirty(false);
-  }
+  await openTab({ id, host, code: preCode });
+
   bindToolbar();
   bindMetaFields();
   bindSettingsPop();
+  bindTabMessages();
   // Global save shortcut — works regardless of editor keymap (incl. vim)
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') { e.preventDefault(); openTab({}); }
   });
   window.addEventListener('resize', () => cm.refresh());
   cm.refresh();
   setTimeout(() => cm.refresh(), 150);
   runScanSoon();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+function tabKeyFor(id, host) { return id ? 'id:' + id : 'new:' + (host || '') + ':' + Date.now() + Math.random().toString(36).slice(2); }
+
+async function openTab({ id, host, code } = {}) {
+  if (id) { const existing = tabs.find(t => t.scriptId === id); if (existing) { activateTab(existing.key); return; } }
+  let docCode = code, meta = {}, title = 'New Script';
+  if (id) {
+    const scripts = await msg('GET_SCRIPTS');
+    const sc = scripts[id];
+    if (sc) { docCode = sc.code || ''; meta = sc.meta || {}; title = meta.name || id; }
+  } else {
+    docCode = code || (await msg('BUILD_DEFAULT', { host })) || '';
+    meta = await msg('PARSE_META', { code: docCode }) || {};
+    title = meta.name || 'New Script';
+  }
+  const key = tabKeyFor(id, host);
+  const tab = { key, scriptId: id || null, host: host || '', title, dirty: false, meta, doc: CodeMirror.Doc(docCode || '', 'javascript') };
+  tabs.push(tab);
+  if (!id && tabs.length === 1) $('sidebar')?.classList.add('collapsed'); // don't front-load the metadata form on a fresh script
+  activateTab(key);
+}
+
+function activateTab(key) {
+  const tab = tabs.find(t => t.key === key);
+  if (!tab) return;
+  if (activeKey) { const cur = tabs.find(t => t.key === activeKey); if (cur) cur.doc = cm.getDoc(); }
+  activeKey = key;
+  scriptId = tab.scriptId;
+  cm.swapDoc(tab.doc);
+  currentMeta = tab.meta || {};
+  loadMeta(currentMeta);
+  $('editorTitle').textContent = tab.title;
+  setDirty(tab.dirty);
+  if (tab.scriptId) msg('GET_SCRIPTS').then(scripts => { if (scripts[tab.scriptId]) showScriptInfo(scripts[tab.scriptId]); });
+  else $('scriptInfoBox').style.display = 'none';
+  renderTabStrip();
+  setTimeout(() => { cm.refresh(); updateStatusBar(); }, 0);
+  runScanSoon();
+}
+
+function closeTab(key) {
+  const idx = tabs.findIndex(t => t.key === key);
+  if (idx === -1) return;
+  if (tabs[idx].dirty && !confirm(`"${tabs[idx].title}" has unsaved changes. Close anyway?`)) return;
+  tabs.splice(idx, 1);
+  if (activeKey === key) {
+    activeKey = null;
+    if (tabs.length) activateTab(tabs[Math.min(idx, tabs.length - 1)].key);
+    else { chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') }); window.close(); }
+  } else renderTabStrip();
+}
+
+function renderTabStrip() {
+  const el = $('editorTabs');
+  if (!el) return;
+  el.innerHTML = tabs.map(t => `
+    <div class="et-tab ${t.key === activeKey ? 'active' : ''} ${t.dirty ? 'dirty' : ''}" data-key="${esc(t.key)}" title="${esc(t.title)}">
+      <span class="et-dot"></span><span class="et-name">${esc(t.title)}</span>
+      <span class="et-close" data-close="${esc(t.key)}">✕</span>
+    </div>`).join('') + `<div class="et-new" id="etNewTab" title="New script (Ctrl+T)">+</div>`;
+  el.querySelectorAll('.et-tab').forEach(row => row.addEventListener('click', e => { if (!e.target.closest('[data-close]')) activateTab(row.dataset.key); }));
+  el.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); closeTab(btn.dataset.close); }));
+  $('etNewTab')?.addEventListener('click', () => openTab({}));
+}
+
+function bindTabMessages() {
+  chrome.runtime.onMessage.addListener(m => { if (m?.type === 'KV_OPEN_TAB') openTab({ id: m.id, host: m.host, code: m.code }); });
 }
 function applyEditorDefaults() {
   settings = {
@@ -111,6 +168,8 @@ function initEditor() {
     setDirty(true);
     updateStatusBar();
     if (settings.editorAutoSave) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 1500); }
+    clearTimeout(metaSyncTimer);
+    metaSyncTimer = setTimeout(syncMetaFromCodeIfIdle, 500);
   });
   cm.on('cursorActivity', updateStatusBar);
   cm.on('keyHandled', updateStatusBar);
@@ -314,11 +373,15 @@ function sortLines() {
 }
 async function saveAndClose() {
   await save();
-  if (!isDirty) { chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') }); window.close(); }
+  if (!isDirty) closeTab(activeKey);
 }
 
 // ── Status bar ────────────────────────────────────────────────────
-function setDirty(d) { isDirty = d; $('statusDirty').classList.toggle('visible', d); }
+function setDirty(d) {
+  isDirty = d; $('statusDirty').classList.toggle('visible', d);
+  const tab = tabs.find(t => t.key === activeKey);
+  if (tab && tab.dirty !== d) { tab.dirty = d; renderTabStrip(); }
+}
 function updateStatusBar() {
   const cur = cm.getCursor();
   $('statusLine').textContent = `Ln ${cur.line + 1}, Col ${cur.ch + 1}`;
@@ -367,7 +430,7 @@ function bindToolbar() {
   $('opSaveClose').addEventListener('click', saveAndClose);
   $('btnSidebar').addEventListener('click', () => { $('sidebar').classList.toggle('collapsed'); setTimeout(() => cm.refresh(), 180); });
   $('btnDash').addEventListener('click', () => {
-    if (isDirty && !confirm('Unsaved changes. Leave?')) return;
+    if (tabs.some(t => t.dirty) && !confirm('You have unsaved changes in one or more tabs. Leave anyway?')) return;
     chrome.tabs.create({ url: chrome.runtime.getURL('pages/dashboard.html') });
     window.close();
   });
@@ -418,9 +481,17 @@ async function save() {
   const result = await msg('SAVE_SCRIPT', { code, sourceUrl: scriptId ? undefined : 'editor' });
   if (result?.id) {
     scriptId = result.id;
-    $('editorTitle').textContent = result.script?.meta?.name || scriptId;
+    const title = result.script?.meta?.name || scriptId;
+    $('editorTitle').textContent = title;
     setDirty(false);
     $('statusSaved').textContent = 'Saved ' + new Date().toLocaleTimeString();
+    const tab = tabs.find(t => t.key === activeKey);
+    if (tab) {
+      tab.scriptId = scriptId; tab.title = title; tab.meta = result.script?.meta || tab.meta;
+      const newKey = 'id:' + scriptId;
+      if (tab.key !== newKey) { tab.key = newKey; activeKey = newKey; }
+    }
+    renderTabStrip();
     runScan();
   }
 }
@@ -476,6 +547,17 @@ function syncMetaToCode() {
   setDirty(true);
 }
 function syncMetaFromCode() { msg('PARSE_META', { code: cm.getValue() }).then(meta => { if (meta && meta.name) loadMeta(meta); }); }
+function syncMetaFromCodeIfIdle() {
+  // Don't clobber the user if they're actively typing inside a sidebar field
+  if (document.activeElement && $('sidebar').contains(document.activeElement)) return;
+  msg('PARSE_META', { code: cm.getValue() }).then(meta => {
+    if (!meta) return;
+    currentMeta = meta;
+    loadMeta(meta);
+    const tab = tabs.find(t => t.key === activeKey);
+    if (tab) { tab.meta = meta; tab.title = meta.name || tab.title; $('editorTitle').textContent = tab.title; renderTabStrip(); }
+  });
+}
 function buildMetaFromSidebar() {
   return {
     name: $('mName').value || 'Unnamed Script', namespace: $('mNs').value || 'https://kingvamp.local/',
