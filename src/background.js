@@ -172,12 +172,13 @@ function scanScript(code) {
 const requireCache = new Map();
 
 async function loadRequire(url) {
-  if (requireCache.has(url)) return requireCache.get(url);
+  const isLocal = /^file:\/\//i.test(url);
+  if (!isLocal && requireCache.has(url)) return requireCache.get(url);
   try {
-    const r = await fetch(url, { cache: 'force-cache' });
+    const r = await fetch(url, { cache: isLocal ? 'no-store' : 'force-cache' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const code = await r.text();
-    requireCache.set(url, code);
+    if (!isLocal) requireCache.set(url, code);
     return code;
   } catch (e) {
     console.warn('[KV] @require failed:', url, e.message);

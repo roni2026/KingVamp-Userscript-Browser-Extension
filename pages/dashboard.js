@@ -163,6 +163,11 @@ async function loadSettings(){
   const s=await msg('GET_SETTINGS'),siteSettings=await msg('GET_SITE_SETTINGS')||{};
   $('setGlobal').checked=s.globalEnabled!==false;$('setBadge').checked=s.showBadge!==false;$('setAutoUpdate').checked=s.autoUpdate!==false;$('setLogLimit').value=s.logLimit||500;
   $('setLogLevel').value=s.logLevel||'all';$('setDefaultRunAt').value=s.defaultRunAt||'document-idle';
+  applyConfigMode(s.configMode||'beginner');
+  document.querySelectorAll('.cfgmode-btn').forEach(b=>b.onclick=async()=>{
+    applyConfigMode(b.dataset.mode);
+    await msg('SAVE_SETTINGS',{settings:{...s,configMode:b.dataset.mode}});
+  });
   // editor settings
   $('setEdTheme').value=s.editorTheme||'dracula';$('setEdKeymap').value=s.editorKeymap||'default';
   $('setEdTabSize').value=String(s.editorTabSize||2);$('setEdFontSize').value=String(s.editorFontSize||13);
@@ -172,8 +177,12 @@ async function loadSettings(){
   renderBlocklist(blocked,siteSettings);
   $('btnAddBlock').onclick=async()=>{const host=$('blocklistInput').value.trim().replace(/^https?:\/\//,'').split('/')[0];if(!host)return;siteSettings[host]={...siteSettings[host],disabled:true};await msg('SAVE_SITE_SETTINGS',{siteSettings});$('blocklistInput').value='';loadSettings();};
   chrome.storage.local.getBytesInUse(null,bytes=>{$('storageInfo').innerHTML=`<div class="setting-row"><div class="setting-info"><div class="setting-name">Local Storage Used</div><div class="setting-desc">Scripts, logs, values, settings</div></div><span style="font-family:var(--mono);font-size:13px">${(bytes/1024).toFixed(1)} KB</span></div>`;});
-  $('btnSaveSettings').onclick=async()=>{const updated={...s,globalEnabled:$('setGlobal').checked,showBadge:$('setBadge').checked,autoUpdate:$('setAutoUpdate').checked,logLimit:parseInt($('setLogLimit').value)||500,logLevel:$('setLogLevel').value||'all',defaultRunAt:$('setDefaultRunAt').value||'document-idle'};await msg('SAVE_SETTINGS',{settings:updated});updateHdrStatus(updated.globalEnabled);$('btnSaveSettings').textContent='Saved!';setTimeout(()=>{$('btnSaveSettings').textContent='Save Settings';},1500);};
-  $('btnResetSettings').onclick=async()=>{if(!confirm('Reset all settings to defaults?'))return;await msg('SAVE_SETTINGS',{settings:{globalEnabled:true,autoUpdate:true,showBadge:true,logLimit:500}});loadSettings();};
+  $('btnSaveSettings').onclick=async()=>{const updated={...s,globalEnabled:$('setGlobal').checked,showBadge:$('setBadge').checked,autoUpdate:$('setAutoUpdate').checked,logLimit:parseInt($('setLogLimit').value)||500,logLevel:$('setLogLevel').value||'all',defaultRunAt:$('setDefaultRunAt').value||'document-idle',configMode:$('settingsPanel').dataset.tier};await msg('SAVE_SETTINGS',{settings:updated});updateHdrStatus(updated.globalEnabled);$('btnSaveSettings').textContent='Saved!';setTimeout(()=>{$('btnSaveSettings').textContent='Save Settings';},1500);};
+  $('btnResetSettings').onclick=async()=>{if(!confirm('Reset all settings to defaults?'))return;await msg('SAVE_SETTINGS',{settings:{globalEnabled:true,autoUpdate:true,showBadge:true,logLimit:500,configMode:'beginner'}});loadSettings();};
+}
+function applyConfigMode(mode){
+  $('settingsPanel').dataset.tier=mode;
+  document.querySelectorAll('.cfgmode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
 }
 function renderBlocklist(blocked,siteSettings){
   const el=$('blocklistRows');if(!blocked.length){el.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0">No blocked domains</div>';return;}

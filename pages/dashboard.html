@@ -49,6 +49,11 @@
     .settings-panel{padding:20px;max-width:600px}
     .settings-section{margin-bottom:28px}
     .settings-section h2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);margin-bottom:14px}
+    .cfgmode-btn.active{color:var(--text)!important;background:var(--bg3)}
+    /* Progressive disclosure: hide sections above the current configuration tier */
+    #settingsPanel[data-tier="novice"] .settings-section[data-tier="beginner"],
+    #settingsPanel[data-tier="novice"] .settings-section[data-tier="advanced"],
+    #settingsPanel[data-tier="beginner"] .settings-section[data-tier="advanced"]{display:none}
     .storage-table{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
     .storage-table th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--muted2);padding:6px 10px;border-bottom:1px solid var(--border);background:var(--bg2)}
     .storage-table td{padding:7px 10px;border-bottom:1px solid var(--border);word-break:break-all}
@@ -252,8 +257,18 @@
 
       <!-- SETTINGS -->
       <div class="tab-pane" id="pane-settings">
-        <div class="settings-panel">
-          <div class="settings-section"><h2>General</h2>
+        <div class="settings-panel" id="settingsPanel" data-tier="beginner">
+          <div class="settings-section" data-tier="novice"><h2>Configuration Mode</h2>
+            <div class="card">
+              <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Controls how many settings are shown below. Novice hides everything but the essentials; Advanced shows all options.</p>
+              <div class="cfgmode-seg" style="display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;width:fit-content">
+                <button class="cfgmode-btn" data-mode="novice" style="border:none;background:none;color:var(--muted);font-size:12px;font-weight:600;padding:7px 16px;cursor:pointer">Novice</button>
+                <button class="cfgmode-btn" data-mode="beginner" style="border:none;background:none;color:var(--muted);font-size:12px;font-weight:600;padding:7px 16px;cursor:pointer;border-left:1px solid var(--border);border-right:1px solid var(--border)">Beginner</button>
+                <button class="cfgmode-btn" data-mode="advanced" style="border:none;background:none;color:var(--muted);font-size:12px;font-weight:600;padding:7px 16px;cursor:pointer">Advanced</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section" data-tier="novice"><h2>General</h2>
             <div class="card">
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Master Switch</div><div class="setting-desc">Enable or disable all userscripts globally</div></div><label class="switch"><input type="checkbox" id="setGlobal"><span class="track"></span></label></div>
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Show Badge Count</div><div class="setting-desc">Show how many scripts run on the current tab</div></div><label class="switch"><input type="checkbox" id="setBadge"><span class="track"></span></label></div>
@@ -262,10 +277,10 @@
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Default Run-At</div><div class="setting-desc">@run-at used for new scripts</div></div><select id="setDefaultRunAt" style="width:150px;font-size:12px;padding:5px 7px"><option value="document-idle">document-idle</option><option value="document-end">document-end</option><option value="document-body">document-body</option><option value="document-start">document-start</option></select></div>
             </div>
           </div>
-          <div class="settings-section"><h2>Console &amp; Logging</h2>
+          <div class="settings-section" data-tier="advanced"><h2>Console &amp; Logging</h2>
             <div class="card"><div class="setting-row"><div class="setting-info"><div class="setting-name">Max Log Entries</div><div class="setting-desc">Trim the console log to this many entries</div></div><input type="text" id="setLogLimit" style="width:80px;text-align:right"></div></div>
           </div>
-          <div class="settings-section"><h2>Editor</h2>
+          <div class="settings-section" data-tier="beginner"><h2>Editor</h2>
             <div class="card">
               <div class="form-row">
                 <div class="form-group"><label>Theme</label><select id="setEdTheme"><option value="dracula">Dracula</option><option value="monokai">Monokai</option><option value="material">Material</option><option value="solarized dark">Solarized Dark</option><option value="solarized light">Solarized Light</option><option value="default">Default</option></select></div>
@@ -280,14 +295,21 @@
               <div class="setting-row"><div class="setting-info"><div class="setting-name">Auto-Save</div><div class="setting-desc">Save the script 1.5s after you stop typing</div></div><label class="switch"><input type="checkbox" id="setEdAutoSave"><span class="track"></span></label></div>
             </div>
           </div>
-          <div class="settings-section"><h2>Site Blocklist</h2>
+          <div class="settings-section" data-tier="beginner"><h2>Site Blocklist</h2>
             <div class="card">
               <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Domains where KingVamp is always disabled.</p>
               <div id="blocklistRows"></div>
               <div style="display:flex;gap:8px;margin-top:10px"><input type="text" id="blocklistInput" placeholder="example.com" style="flex:1"><button class="btn sm" id="btnAddBlock">Add</button></div>
             </div>
           </div>
-          <div class="settings-section"><h2>Storage Info</h2><div class="card" id="storageInfo"></div></div>
+          <div class="settings-section" data-tier="advanced"><h2>Local File Access (Rapid Development)</h2>
+            <div class="card">
+              <p style="font-size:12px;color:var(--muted);margin-bottom:6px">To <code>@require file:///path/to/script.js</code> your own local copy while developing (like Tampermonkey's file-access mode), enable <b>Allow access to file URLs</b> for KingVamp on your browser's extension page:</p>
+              <p style="font-size:12px;color:var(--muted)"><code>chrome://extensions</code> → KingVamp → Details → Allow access to file URLs</p>
+              <p style="font-size:11px;color:var(--muted2);margin-top:6px">This can't be toggled from inside the extension — the browser requires you to grant it from that page.</p>
+            </div>
+          </div>
+          <div class="settings-section" data-tier="advanced"><h2>Storage Info</h2><div class="card" id="storageInfo"></div></div>
           <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn primary" id="btnSaveSettings">Save Settings</button>
             <button class="btn danger" id="btnResetSettings">Reset to Defaults</button>
