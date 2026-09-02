@@ -122,6 +122,20 @@
     .overflow-pop button svg{color:var(--muted);flex-shrink:0}
     .overflow-pop .op-sep{height:1px;background:var(--border);margin:5px 8px}
 
+    /* ── Tab strip ── */
+    .editor-tabs{display:flex;align-items:stretch;background:var(--bg2);border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none;flex-shrink:0}
+    .editor-tabs::-webkit-scrollbar{display:none}
+    .et-tab{display:flex;align-items:center;gap:6px;padding:7px 10px;font-size:11.5px;color:var(--muted);border-right:1px solid var(--border);cursor:pointer;white-space:nowrap;max-width:180px;user-select:none}
+    .et-tab .et-dot{width:6px;height:6px;border-radius:50%;background:var(--yellow);flex-shrink:0;display:none}
+    .et-tab.dirty .et-dot{display:inline-block}
+    .et-tab span.et-name{overflow:hidden;text-overflow:ellipsis}
+    .et-tab.active{background:var(--bg);color:var(--text);box-shadow:inset 0 -2px 0 var(--red)}
+    .et-tab .et-close{opacity:0;flex-shrink:0;border-radius:3px;padding:1px 4px;font-size:11px}
+    .et-tab:hover .et-close,.et-tab.active .et-close{opacity:.6}
+    .et-tab .et-close:hover{opacity:1;background:var(--bg3)}
+    .et-new{padding:7px 10px;color:var(--muted);cursor:pointer;flex-shrink:0}
+    .et-new:hover{color:var(--text)}
+
     @media (max-width: 880px){
       .sidebar{position:fixed;right:0;top:46px;bottom:0;z-index:60;box-shadow:-8px 0 24px rgba(0,0,0,.4)}
       .sidebar.collapsed{width:0}
@@ -130,6 +144,7 @@
 </head>
 <body>
 <div id="app">
+  <div class="editor-tabs" id="editorTabs"></div>
   <div class="kv-head editor-toolbar">
     <div class="logo">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
