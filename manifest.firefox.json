@@ -38,7 +38,7 @@
     "contextMenus",
     "cookies"
   ],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": ["http://*/*", "https://*/*", "file:///*"],
   "action": {
     "default_popup": "pages/popup.html",
     "default_icon": {
